@@ -1,10 +1,8 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import bcrypt from "bcryptjs";
-import { createHash } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { createApp } from "../src/app.js";
-import { createPasswordResetEmailSender } from "../src/mailer.js";
 
 process.env.FRONTEND_ORIGIN = "http://localhost:5173";
 process.env.JWT_SECRET = "test-secret-with-more-than-thirty-two-characters";
@@ -42,42 +40,174 @@ let lastAthleteSearchSql = "";
 const userBlocks = new Set();
 const storedMessages = [];
 const storedReports = [];
-const passwordResetTokens = new Map();
+const storedPasswordResetRequests = [];
+const storedPasswordResetAudit = [];
 let nextMessageId = 1;
 let nextReportId = 1;
-let lastPasswordResetEmail = null;
-let passwordResetMailError = null;
+let nextPasswordResetRequestId = 1;
+let testUserTokenVersion = 0;
 
 const fakePool = {
     async query(sql, values = []) {
-        if (sql.includes("WITH consumed_token AS")) {
-            const [tokenHash, passwordHash] = values;
-            const token = passwordResetTokens.get(tokenHash);
-            if (!token || token.expiresAt <= Date.now()) return { rows: [], rowCount: 0 };
-            passwordResetTokens.delete(tokenHash);
-            testPasswordHash = passwordHash;
-            return { rows: [{ id: 1 }], rowCount: 1 };
+        if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) {
+            return { rows: [], rowCount: 0 };
         }
-        if (sql.includes("INSERT INTO") && sql.includes(".password_reset_tokens")) {
-            const [tokenHash, userId, expiresAt] = values;
-            passwordResetTokens.set(tokenHash, { userId, expiresAt: new Date(expiresAt).getTime() });
-            return { rows: [], rowCount: 1 };
+        if (sql.includes("SELECT id FROM") && sql.includes("LOWER(email) = LOWER($1)") && sql.includes(".users")) {
+            return values[0].toLowerCase() === "athlete@example.com"
+                ? { rows: [{ id: 1 }], rowCount: 1 }
+                : { rows: [], rowCount: 0 };
         }
-        if (sql.includes("DELETE FROM") && sql.includes(".password_reset_tokens")) {
-            if (sql.includes("WHERE user_id = $1")) {
-                for (const [hash, token] of passwordResetTokens) {
-                    if (String(token.userId) === String(values[0])) passwordResetTokens.delete(hash);
+        if (sql.includes("UPDATE") && sql.includes(".password_reset_requests")
+            && sql.includes("SET status = 'superseded'")) {
+            storedPasswordResetRequests.forEach((entry) => {
+                if (entry.user_id === Number(values[0]) && entry.status === "approved") {
+                    entry.status = "superseded";
+                    entry.reset_code_hash = null;
+                    entry.reset_code_expires_at = null;
                 }
-            } else {
-                passwordResetTokens.delete(values[0]);
-            }
+            });
             return { rows: [], rowCount: 1 };
         }
-        if (sql.includes("SELECT id, email FROM") && sql.includes(".users")) {
-            const user = String(values[0]).toLowerCase() === "athlete@example.com"
-                ? { id: 1, email: "athlete@example.com" }
-                : null;
-            return { rows: user ? [user] : [], rowCount: user ? 1 : 0 };
+        if (sql.includes("INSERT INTO") && sql.includes(".password_reset_requests (user_id)")) {
+            let entry = storedPasswordResetRequests.find((item) => item.user_id === Number(values[0]) && item.status === "pending");
+            if (entry) {
+                entry.requested_at = new Date().toISOString();
+            } else {
+                entry = {
+                    id: nextPasswordResetRequestId++,
+                    user_id: Number(values[0]),
+                    status: "pending",
+                    requested_at: new Date().toISOString(),
+                    reviewed_at: null,
+                    reset_code_expires_at: null,
+                    reset_code_hash: null,
+                    failed_attempts: 0,
+                };
+                storedPasswordResetRequests.push(entry);
+            }
+            return { rows: [{ id: entry.id }], rowCount: 1 };
+        }
+        if (sql.includes("INSERT INTO") && sql.includes(".password_reset_audit")) {
+            let entry;
+            if (sql.includes("event_type, details")) {
+                const [requestId, userId, eventType, details] = values;
+                entry = { reset_request_id: requestId, user_id: userId, actor_id: null, event_type: eventType, details: JSON.parse(details) };
+            } else if (sql.includes("actor_id, event_type")) {
+                const [requestId, userId, actorId, eventType] = values;
+                entry = {
+                    reset_request_id: requestId,
+                    user_id: userId,
+                    actor_id: actorId,
+                    event_type: eventType || (sql.includes("'declined'") ? "declined" : undefined),
+                    details: {},
+                };
+            } else {
+                const [requestId, userId] = values;
+                entry = {
+                    reset_request_id: requestId,
+                    user_id: userId,
+                    actor_id: null,
+                    event_type: sql.includes("'requested'") ? "requested" : "reset_completed",
+                    details: {},
+                };
+            }
+            storedPasswordResetAudit.push({ id: storedPasswordResetAudit.length + 1, ...entry, created_at: new Date().toISOString() });
+            return { rows: [], rowCount: 1 };
+        }
+        if (sql.includes("SELECT e.id, e.reset_request_id")) {
+            return {
+                rows: [...storedPasswordResetAudit].reverse().map((entry) => ({
+                    ...entry,
+                    target_username: "test-athlete",
+                    target_email: "athlete@example.com",
+                    actor_username: entry.actor_id ? "test-admin" : null,
+                })),
+                rowCount: storedPasswordResetAudit.length,
+            };
+        }
+        if (sql.includes("SELECT r.id, r.user_id, r.reset_code_hash")) {
+            const entry = storedPasswordResetRequests.find((item) => item.user_id === 1
+                && item.status === "approved"
+                && item.failed_attempts < 5
+                && item.reset_code_expires_at > new Date());
+            return { rows: entry ? [{ ...entry }] : [], rowCount: entry ? 1 : 0 };
+        }
+        if (sql.includes("SET failed_attempts = failed_attempts + 1")) {
+            const entry = storedPasswordResetRequests.find((item) => item.id === Number(values[0]));
+            if (entry) {
+                entry.failed_attempts += 1;
+                if (entry.failed_attempts >= 5) {
+                    entry.reset_code_hash = null;
+                    entry.reset_code_expires_at = null;
+                }
+            }
+            return { rows: [], rowCount: entry ? 1 : 0 };
+        }
+        if (sql.includes("UPDATE") && sql.includes(".users SET password_hash = $1")) {
+            testPasswordHash = values[0];
+            testUserTokenVersion += 1;
+            return { rows: [], rowCount: 1 };
+        }
+        if (sql.includes("UPDATE") && sql.includes(".password_reset_requests")
+            && sql.includes("SET status = 'completed'")) {
+            const entry = storedPasswordResetRequests.find((item) => item.id === Number(values[0]));
+            if (entry) {
+                entry.status = "completed";
+                entry.reset_code_hash = null;
+                entry.reset_code_expires_at = null;
+            }
+            return { rows: [], rowCount: entry ? 1 : 0 };
+        }
+        if (sql.includes("UPDATE") && sql.includes(".password_reset_requests")
+            && sql.includes("SET status = 'declined'")) {
+            const entry = storedPasswordResetRequests.find((item) => item.id === Number(values[1]) && item.status === "pending");
+            if (entry) {
+                entry.status = "declined";
+                entry.reviewed_at = new Date().toISOString();
+            }
+            return { rows: entry ? [{ ...entry }] : [], rowCount: entry ? 1 : 0 };
+        }
+        if (sql.includes("UPDATE") && sql.includes(".password_reset_requests r")
+            && sql.includes("SET status = 'approved'")) {
+            const [reviewerId, codeHash, expiresAt, requestId, allowedStatus] = values;
+            const entry = storedPasswordResetRequests.find((item) => item.id === Number(requestId)
+                && item.status === allowedStatus);
+            if (entry) {
+                entry.status = "approved";
+                entry.reviewed_by = reviewerId;
+                entry.reviewed_at = new Date().toISOString();
+                entry.reset_code_hash = codeHash;
+                entry.reset_code_expires_at = expiresAt;
+                entry.failed_attempts = 0;
+            }
+            return { rows: entry ? [{ ...entry }] : [], rowCount: entry ? 1 : 0 };
+        }
+        if (sql.includes("SELECT id, status FROM") && sql.includes(".password_reset_requests")) {
+            const entry = storedPasswordResetRequests.find((item) => item.id === Number(values[0]));
+            return { rows: entry ? [{ id: entry.id, status: entry.status }] : [], rowCount: entry ? 1 : 0 };
+        }
+        if (sql.includes("SELECT r.id, r.status, u.is_active")) {
+            const entry = storedPasswordResetRequests.find((item) => item.id === Number(values[0]));
+            return { rows: entry ? [{ id: entry.id, status: entry.status, is_active: true }] : [], rowCount: entry ? 1 : 0 };
+        }
+        if (sql.includes("SELECT r.id, r.user_id, u.username, u.email, u.role")) {
+            return {
+                rows: storedPasswordResetRequests
+                    .filter((entry) => ["pending", "approved"].includes(entry.status))
+                    .map((entry) => ({
+                        id: entry.id,
+                        user_id: entry.user_id,
+                        status: entry.status,
+                        requested_at: entry.requested_at,
+                        reviewed_at: entry.reviewed_at,
+                        reset_code_expires_at: entry.reset_code_expires_at,
+                        failed_attempts: entry.failed_attempts,
+                        username: "test-athlete",
+                        email: "athlete@example.com",
+                        role: "athlete",
+                    })),
+                rowCount: storedPasswordResetRequests.length,
+            };
         }
         if (sql.includes("AS blocked_user_id") && sql.includes(".user_blocks b")) {
             const blockerId = String(values[0]);
@@ -321,6 +451,8 @@ const fakePool = {
                     messages: 0,
                     pending_approval_requests: [athleteVerification.status, scoutVerificationStatus]
                         .filter((status) => status === "pending").length,
+                    pending_password_reset_requests: storedPasswordResetRequests
+                        .filter((entry) => entry.status === "pending").length,
                 }],
                 rowCount: 1,
             };
@@ -349,6 +481,7 @@ const fakePool = {
                     email: "athlete@example.com",
                     role: "athlete",
                     is_active: true,
+                    token_version: testUserTokenVersion,
                     password_hash: testPasswordHash,
                     has_profile_photo: false,
                 }],
@@ -398,10 +531,10 @@ const fakePool = {
         if (sql.includes("SELECT id, username, email, role, is_active")) {
             const id = String(values[0]);
             const user = id === "2"
-                ? { id: 2, username: "test-admin", email: "admin@example.com", role: "admin", is_active: true, verification_status: "unverified" }
+                ? { id: 2, username: "test-admin", email: "admin@example.com", role: "admin", is_active: true, token_version: 0, verification_status: "unverified" }
                 : id === "3"
-                    ? { id: 3, username: "test-scout", email: "scout@example.com", role: "scout", is_active: true, verification_status: scoutVerificationStatus }
-                    : { id: 1, username: "test-athlete", email: "athlete@example.com", role: "athlete", is_active: true, verification_status: athleteVerification.status };
+                    ? { id: 3, username: "test-scout", email: "scout@example.com", role: "scout", is_active: true, token_version: 0, verification_status: scoutVerificationStatus }
+                    : { id: 1, username: "test-athlete", email: "athlete@example.com", role: "athlete", is_active: true, token_version: testUserTokenVersion, verification_status: athleteVerification.status };
             return { rows: [user], rowCount: 1 };
         }
         if (sql.includes("SET profile_photo = $1")) {
@@ -414,16 +547,14 @@ const fakePool = {
         }
         return { rows: [{ "?column?": 1 }], rowCount: 1 };
     },
+    async connect() {
+        return { query: this.query.bind(this), release() {} };
+    },
 };
 
 let testPasswordHash;
 let lastLoginIdentifier;
-const app = createApp(fakePool, {
-    async sendPasswordResetEmail(message) {
-        if (passwordResetMailError) throw passwordResetMailError;
-        lastPasswordResetEmail = message;
-    },
-});
+const app = createApp(fakePool);
 let server;
 let baseUrl;
 
@@ -569,91 +700,6 @@ test("administrator login portal rejects non-administrator accounts", async () =
 
     assert.equal(response.status, 403);
     assert.deepEqual(await response.json(), { error: "Please use the Administrator login portal." });
-});
-
-test("password reset requests do not reveal whether an email belongs to an account", async () => {
-    lastPasswordResetEmail = null;
-    const knownAccount = await fetch(`${baseUrl}/api/auth/password-reset/request`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: "ATHLETE@example.com" }),
-    });
-    const unknownAccount = await fetch(`${baseUrl}/api/auth/password-reset/request`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: "nobody@example.com" }),
-    });
-
-    assert.equal(knownAccount.status, 202);
-    assert.equal(unknownAccount.status, 202);
-    assert.deepEqual(await knownAccount.json(), await unknownAccount.json());
-    assert.equal(lastPasswordResetEmail.to, "athlete@example.com");
-    const token = new URLSearchParams(new URL(lastPasswordResetEmail.resetUrl).hash.slice(1)).get("token");
-    assert.match(token, /^[A-Za-z0-9_-]{43}$/);
-    const tokenHash = createHash("sha256").update(token).digest("hex");
-    assert.equal(passwordResetTokens.has(tokenHash), true);
-    assert.equal(passwordResetTokens.has(token), false);
-});
-
-test("password reset links update the password once and reject expired or reused tokens", async () => {
-    const token = new URLSearchParams(new URL(lastPasswordResetEmail.resetUrl).hash.slice(1)).get("token");
-    const newPassword = "new-secure-password-456";
-    const update = await fetch(`${baseUrl}/api/auth/password-reset/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, password: newPassword }),
-    });
-    assert.equal(update.status, 200);
-    assert.deepEqual(await update.json(), { message: "Your password has been updated. You can now log in." });
-    assert.equal(await bcrypt.compare(newPassword, testPasswordHash), true);
-
-    const reuse = await fetch(`${baseUrl}/api/auth/password-reset/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, password: "another-secure-password-789" }),
-    });
-    assert.equal(reuse.status, 400);
-
-    const expiredToken = "x".repeat(43);
-    passwordResetTokens.set(createHash("sha256").update(expiredToken).digest("hex"), {
-        userId: 1,
-        expiresAt: Date.now() - 1000,
-    });
-    const expired = await fetch(`${baseUrl}/api/auth/password-reset/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: expiredToken, password: newPassword }),
-    });
-    assert.equal(expired.status, 400);
-
-    const tooShort = await fetch(`${baseUrl}/api/auth/password-reset/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: expiredToken, password: "short" }),
-    });
-    assert.equal(tooShort.status, 400);
-
-    const login = await fetch(`${baseUrl}/api/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: "athlete@example.com", password: newPassword }),
-    });
-    assert.equal(login.status, 200);
-});
-
-test("password reset mailer remains optional until SMTP credentials are configured", () => {
-    assert.equal(createPasswordResetEmailSender({ SMTP_PORT: "587" }), null);
-    assert.throws(
-        () => createPasswordResetEmailSender({ SMTP_HOST: "smtp.example.com" }),
-        /Configure all password-reset email settings/,
-    );
-    assert.equal(typeof createPasswordResetEmailSender({
-        SMTP_HOST: "smtp.example.com",
-        SMTP_PORT: "587",
-        SMTP_USER: "sender@example.com",
-        SMTP_PASSWORD: "test-password",
-        SMTP_FROM: "SSCS <sender@example.com>",
-    }), "function");
 });
 
 test("admin user list includes all athlete profile fields", async () => {
@@ -1018,4 +1064,230 @@ test("athletes can request manual profile review and admins can approve it", asy
     assert.equal(unchangedAgencyProfile.status, 200);
     assert.equal((await unchangedAgencyProfile.json()).agency.verification_status, "verified");
     scoutVerificationStatus = previousScoutVerification;
+});
+
+test("password reset requests stay private until admin review and approved codes work once", async () => {
+    storedPasswordResetRequests.length = 0;
+    storedPasswordResetAudit.length = 0;
+    nextPasswordResetRequestId = 1;
+    testUserTokenVersion = 0;
+    testPasswordHash = await bcrypt.hash("valid-password-123", 4);
+
+    const requestReset = (email) => fetch(`${baseUrl}/api/auth/password-reset-requests`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+    });
+    const existingAccountResponse = await requestReset("ATHLETE@example.com");
+    const unknownAccountResponse = await requestReset("unknown@example.com");
+    assert.equal(existingAccountResponse.status, 202);
+    assert.equal(unknownAccountResponse.status, 202);
+    assert.deepEqual(await existingAccountResponse.json(), await unknownAccountResponse.json());
+    assert.equal(storedPasswordResetRequests.length, 1);
+    assert.equal(storedPasswordResetAudit[0].event_type, "requested");
+
+    const adminToken = jwt.sign(
+        { sub: "2", role: "admin", ver: 0 },
+        process.env.JWT_SECRET,
+        { expiresIn: "1h", issuer: "sscs-api", audience: "sscs-web" },
+    );
+    const adminHeaders = {
+        Cookie: `sscs_session=${adminToken}`,
+        "Content-Type": "application/json",
+    };
+    const queue = await fetch(`${baseUrl}/api/admin/password-reset-requests`, {
+        headers: { Cookie: `sscs_session=${adminToken}` },
+    });
+    assert.equal(queue.status, 200);
+    const queuedRequests = await queue.json();
+    assert.equal(queuedRequests.requests.length, 1);
+    assert.equal("reset_code_hash" in queuedRequests.requests[0], false);
+    const adminSummary = await fetch(`${baseUrl}/api/admin/summary`, {
+        headers: { Cookie: `sscs_session=${adminToken}` },
+    });
+    assert.equal((await adminSummary.json()).summary.pending_password_reset_requests, 1);
+
+    const approval = await fetch(`${baseUrl}/api/admin/password-reset-requests/1`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({ status: "approved" }),
+    });
+    assert.equal(approval.status, 200);
+    const { resetCode } = await approval.json();
+    assert.match(resetCode, /^[A-Za-z0-9_-]{43}$/);
+    const replacement = await fetch(`${baseUrl}/api/admin/password-reset-requests/1`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({ status: "regenerate" }),
+    });
+    assert.equal(replacement.status, 200);
+    const { resetCode: replacementCode } = await replacement.json();
+    assert.notEqual(replacementCode, resetCode);
+
+    const oldSession = jwt.sign(
+        { sub: "1", role: "athlete", ver: 0 },
+        process.env.JWT_SECRET,
+        { expiresIn: "1h", issuer: "sscs-api", audience: "sscs-web" },
+    );
+    const reset = await fetch(`${baseUrl}/api/auth/password-reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            email: "athlete@example.com",
+            code: resetCode,
+            password: "new-valid-password-456",
+        }),
+    });
+    assert.equal(reset.status, 400);
+    const approvedReset = await fetch(`${baseUrl}/api/auth/password-reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            email: "athlete@example.com",
+            code: replacementCode,
+            password: "new-valid-password-456",
+        }),
+    });
+    assert.equal(approvedReset.status, 200);
+
+    const replay = await fetch(`${baseUrl}/api/auth/password-reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            email: "athlete@example.com",
+            code: replacementCode,
+            password: "another-valid-password-789",
+        }),
+    });
+    assert.equal(replay.status, 400);
+
+    const oldSessionCheck = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: { Cookie: `sscs_session=${oldSession}` },
+    });
+    assert.equal(oldSessionCheck.status, 401);
+
+    const login = await fetch(`${baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            email: "athlete@example.com",
+            password: "new-valid-password-456",
+            expectedRole: "athlete",
+        }),
+    });
+    assert.equal(login.status, 200);
+    const audit = await fetch(`${baseUrl}/api/admin/password-reset-audit`, {
+        headers: { Cookie: `sscs_session=${adminToken}` },
+    });
+    const events = (await audit.json()).events.map((event) => event.event_type);
+    assert.ok(events.includes("approved"));
+    assert.ok(events.includes("code_regenerated"));
+    assert.ok(events.includes("code_attempt_failed"));
+    assert.ok(events.includes("reset_completed"));
+});
+
+test("admins can decline password reset requests without issuing a code", async () => {
+    storedPasswordResetRequests.length = 0;
+    storedPasswordResetAudit.length = 0;
+    nextPasswordResetRequestId = 1;
+    testUserTokenVersion = 0;
+    testPasswordHash = await bcrypt.hash("valid-password-123", 4);
+    await fetch(`${baseUrl}/api/auth/password-reset-requests`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "athlete@example.com" }),
+    });
+    const adminToken = jwt.sign(
+        { sub: "2", role: "admin" },
+        process.env.JWT_SECRET,
+        { expiresIn: "1h", issuer: "sscs-api", audience: "sscs-web" },
+    );
+    const response = await fetch(`${baseUrl}/api/admin/password-reset-requests/1`, {
+        method: "PATCH",
+        headers: {
+            Cookie: `sscs_session=${adminToken}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: "declined" }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).request.status, "declined");
+    assert.equal(storedPasswordResetRequests[0].reset_code_hash, null);
+    assert.equal(storedPasswordResetAudit[1].event_type, "declined");
+});
+
+test("the fifth incorrect code attempt locks the code until an admin regenerates it", async () => {
+    storedPasswordResetRequests.length = 0;
+    storedPasswordResetAudit.length = 0;
+    nextPasswordResetRequestId = 1;
+    testUserTokenVersion = 0;
+    testPasswordHash = await bcrypt.hash("valid-password-123", 4);
+    await fetch(`${baseUrl}/api/auth/password-reset-requests`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "athlete@example.com" }),
+    });
+    const adminToken = jwt.sign(
+        { sub: "2", role: "admin" },
+        process.env.JWT_SECRET,
+        { expiresIn: "1h", issuer: "sscs-api", audience: "sscs-web" },
+    );
+    const adminHeaders = {
+        Cookie: `sscs_session=${adminToken}`,
+        "Content-Type": "application/json",
+    };
+    const approval = await fetch(`${baseUrl}/api/admin/password-reset-requests/1`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({ status: "approved" }),
+    });
+    const oldCode = (await approval.json()).resetCode;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        const rejected = await fetch(`${baseUrl}/api/auth/password-reset`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                email: "athlete@example.com",
+                code: `wrong-code-${attempt}`,
+                password: "valid-password-123",
+            }),
+        });
+        assert.equal(rejected.status, 400);
+    }
+
+    const lockedCodeResponse = await fetch(`${baseUrl}/api/auth/password-reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            email: "athlete@example.com",
+            code: oldCode,
+            password: "valid-password-123",
+        }),
+    });
+    assert.equal(lockedCodeResponse.status, 400);
+    assert.equal(storedPasswordResetRequests[0].failed_attempts, 5);
+    assert.equal(storedPasswordResetRequests[0].reset_code_hash, null);
+
+    const replacement = await fetch(`${baseUrl}/api/admin/password-reset-requests/1`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({ status: "regenerate" }),
+    });
+    assert.equal(replacement.status, 200);
+    const newCode = (await replacement.json()).resetCode;
+    assert.notEqual(newCode, oldCode);
+    assert.equal(storedPasswordResetRequests[0].failed_attempts, 0);
+
+    const successfulReset = await fetch(`${baseUrl}/api/auth/password-reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            email: "athlete@example.com",
+            code: newCode,
+            password: "new-valid-password-456",
+        }),
+    });
+    assert.equal(successfulReset.status, 200);
+    assert.ok(storedPasswordResetAudit.some((event) => event.event_type === "code_locked"));
+    assert.ok(storedPasswordResetAudit.some((event) => event.event_type === "reset_completed"));
 });

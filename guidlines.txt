@@ -28,3 +28,6 @@ Google API credential removed from this file. Revoke or rotate any previously ex
 
 JWT secret key
 7e13e4c2d09d5897d0bb3098d2d7171846186e693f01040b26698ee3efcf452f5849f5cc1ad4dae28e074f662d5b85ab
+
+Resend API for messaging
+re_XvvFpLBQ_Jc13qXc1cRpXyCpyEzkw99ua

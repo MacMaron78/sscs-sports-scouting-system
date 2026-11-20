@@ -12,7 +12,7 @@ function getSecret() {
 
 export function setSessionCookie(response, user) {
     const token = jwt.sign(
-        { sub: String(user.id), role: user.role },
+        { sub: String(user.id), role: user.role, ver: Number(user.token_version || 0) },
         getSecret(),
         { expiresIn: "8h", issuer: "sscs-api", audience: "sscs-web" },
     );
@@ -44,7 +44,7 @@ export function requireAuth(databasePool) {
                 audience: "sscs-web",
             });
             const result = await databasePool.query(
-                `SELECT id, username, email, role, is_active, verification_status,
+                `SELECT id, username, email, role, is_active, token_version, verification_status,
                         profile_photo IS NOT NULL AS has_profile_photo
                  FROM "${process.env.PGSCHEMA || "sscs_api"}".users
                  WHERE id = $1`,
@@ -54,6 +54,10 @@ export function requireAuth(databasePool) {
             if (!user || !user.is_active) {
                 clearSessionCookie(response);
                 return response.status(401).json({ error: "This account is unavailable. Please log in again." });
+            }
+            if (Number(payload.ver ?? 0) !== Number(user.token_version ?? 0)) {
+                clearSessionCookie(response);
+                return response.status(401).json({ error: "Your password changed. Please log in again." });
             }
             request.user = user;
             return next();

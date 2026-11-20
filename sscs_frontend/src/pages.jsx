@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, formatDate } from "./api";
 import { useAuth } from "./auth";
 import { AthleteCard, AuthProgressBar, EmptyState, ErrorNotice, Loading, PageIntro, PhotoAvatar, SuccessNotice, VerificationBadge, VerifiedAccountTick } from "./components";
@@ -583,7 +583,6 @@ const loginPortals = {
 export function LoginPortalPage({ role }) {
     const { login } = useAuth();
     const navigate = useNavigate();
-    const [searchParams] = useSearchParams();
     const [selectedRole, setSelectedRole] = useState(role || "athlete");
     const portal = loginPortals[selectedRole];
     const [email, setEmail] = useState("");
@@ -591,6 +590,11 @@ export function LoginPortalPage({ role }) {
     const [error, setError] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const [progressComplete, setProgressComplete] = useState(false);
+    const [showResetRequest, setShowResetRequest] = useState(false);
+    const [resetEmail, setResetEmail] = useState("");
+    const [resetRequestMessage, setResetRequestMessage] = useState("");
+    const [resetRequestError, setResetRequestError] = useState("");
+    const [requestingReset, setRequestingReset] = useState(false);
 
     useEffect(() => {
         if (role) setSelectedRole(role);
@@ -621,6 +625,24 @@ export function LoginPortalPage({ role }) {
         setSubmitting(false);
         if (requestError) setError(requestError.message);
         else navigate(portal.dashboardPath, { replace: true });
+    }
+
+    async function submitResetRequest(event) {
+        event.preventDefault();
+        setResetRequestError("");
+        setResetRequestMessage("");
+        setRequestingReset(true);
+        try {
+            const result = await api("/auth/password-reset-requests", {
+                method: "POST",
+                body: { email: resetEmail },
+            });
+            setResetRequestMessage(result.message);
+        } catch (requestError) {
+            setResetRequestError(requestError.message);
+        } finally {
+            setRequestingReset(false);
+        }
     }
 
     return <section className="portal-login">
@@ -663,7 +685,6 @@ export function LoginPortalPage({ role }) {
                 </select>
             </label>
             {error && <div className="mb-5 rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-200" role="alert">{error}</div>}
-            {searchParams.get("reset") === "success" && <SuccessNotice>Your password has been updated. Sign in with your new password.</SuccessNotice>}
             <label className="mb-5 block text-sm font-semibold text-slate-700">
                 Email address
                 <input
@@ -688,93 +709,74 @@ export function LoginPortalPage({ role }) {
                     required
                 />
             </label>
-            <p className="forgot-password"><Link to="/forgot-password">Forgot your password?</Link></p>
             <button type="submit" disabled={submitting} className="w-full rounded-xl bg-blue-400 px-5 py-3.5 font-bold text-slate-950 transition hover:bg-blue-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:cursor-wait disabled:opacity-60">
                 {submitting ? "Signing in…" : `Log in to ${portal.title}`}
             </button>
             <p className="mt-6 text-center text-sm text-slate-600">Need an account? <Link className="font-semibold text-blue-700 hover:text-blue-800" to="/register">Register here</Link></p>
         </form>
+        <div className="portal-reset-options">
+            <button
+                type="button"
+                onClick={() => {
+                    setResetEmail(email);
+                    setResetRequestMessage("");
+                    setResetRequestError("");
+                    setShowResetRequest((current) => !current);
+                }}
+            >
+                Forgot your password? Request an admin-approved reset
+            </button>
+            <Link to="/reset-password">I already have a reset code</Link>
+        </div>
+        {showResetRequest && <form className="portal-reset-request" onSubmit={submitResetRequest}>
+            <h2>Request a password reset</h2>
+            <p>An administrator will review your request. If approved, they will share a one-time code with you through a trusted channel.</p>
+            <label>
+                Account email
+                <input
+                    type="email"
+                    autoComplete="email"
+                    value={resetEmail}
+                    onChange={(event) => setResetEmail(event.target.value)}
+                    required
+                    maxLength={254}
+                />
+            </label>
+            {resetRequestError && <p className="portal-reset-feedback is-error" role="alert">{resetRequestError}</p>}
+            {resetRequestMessage && <p className="portal-reset-feedback" role="status">{resetRequestMessage}</p>}
+            <button type="submit" disabled={requestingReset}>
+                {requestingReset ? "Sending request…" : "Send reset request to admin"}
+            </button>
+        </form>}
     </section>;
 }
 
-export function ForgotPasswordPage() {
-    const [email, setEmail] = useState("");
+export function PasswordResetPage() {
+    const [values, setValues] = useState({ email: "", code: "", password: "", confirmPassword: "" });
     const [error, setError] = useState("");
-    const [message, setMessage] = useState("");
+    const [success, setSuccess] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
-    async function submit(event) {
-        event.preventDefault();
-        setError("");
-        setMessage("");
-        setSubmitting(true);
-        try {
-            const result = await api("/auth/password-reset/request", { method: "POST", body: { email } });
-            setMessage(result.message);
-        } catch (requestError) {
-            setError(requestError.message);
-        } finally {
-            setSubmitting(false);
-        }
+    function update(event) {
+        setValues((current) => ({ ...current, [event.target.name]: event.target.value }));
     }
 
-    return <section className="auth-layout">
-        <div className="auth-aside">
-            <p className="eyebrow eyebrow-light">ACCOUNT RECOVERY</p>
-            <h1>Get back to your network.</h1>
-            <p>Request a secure link to choose a new password for your SSCS account.</p>
-            <div className="auth-aside-list"><span>✓ One-time reset link</span><span>✓ Link expires after 60 minutes</span><span>✓ Your account stays private</span></div>
-        </div>
-        <div className="auth-card">
-            <p className="eyebrow">SECURE ACCOUNT ACCESS</p>
-            <h2>Forgot your password?</h2>
-            <p className="form-intro">Enter the email address associated with your account. If it is registered, we will send reset instructions.</p>
-            <ErrorNotice error={error} />
-            <SuccessNotice>{message}</SuccessNotice>
-            <form onSubmit={submit}>
-                <Field
-                    label="Email address"
-                    name="email"
-                    type="email"
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    required
-                    autoComplete="email"
-                />
-                <button className="button button-full" disabled={submitting}>
-                    {submitting ? "Sending instructions…" : "Send reset link"}
-                </button>
-            </form>
-            <p className="auth-switch"><Link to="/login">Back to log in</Link></p>
-        </div>
-    </section>;
-}
-
-export function ResetPasswordPage() {
-    const location = useLocation();
-    const navigate = useNavigate();
-    const token = useMemo(() => new URLSearchParams(location.hash.slice(1)).get("token") || "", [location.hash]);
-    const [password, setPassword] = useState("");
-    const [confirmPassword, setConfirmPassword] = useState("");
-    const [error, setError] = useState("");
-    const [submitting, setSubmitting] = useState(false);
-
     async function submit(event) {
         event.preventDefault();
         setError("");
-        if (!token) {
-            setError("This reset link is invalid or has expired. Request a new one.");
-            return;
-        }
-        if (password !== confirmPassword) {
+        setSuccess("");
+        if (values.password !== values.confirmPassword) {
             setError("The passwords do not match.");
             return;
         }
-
         setSubmitting(true);
         try {
-            await api("/auth/password-reset/complete", { method: "POST", body: { token, password } });
-            navigate("/login?reset=success", { replace: true });
+            const result = await api("/auth/password-reset", {
+                method: "POST",
+                body: { email: values.email, code: values.code, password: values.password },
+            });
+            setSuccess(result.message);
+            setValues((current) => ({ ...current, code: "", password: "", confirmPassword: "" }));
         } catch (requestError) {
             setError(requestError.message);
         } finally {
@@ -782,47 +784,35 @@ export function ResetPasswordPage() {
         }
     }
 
-    return <section className="auth-layout">
-        <div className="auth-aside">
-            <p className="eyebrow eyebrow-light">ACCOUNT RECOVERY</p>
-            <h1>Choose a new password.</h1>
-            <p>Use a strong password that you do not use for another account.</p>
-            <div className="auth-aside-list"><span>✓ At least 10 characters</span><span>✓ Up to 128 characters</span><span>✓ Reset links work once</span></div>
-        </div>
-        <div className="auth-card">
-            <p className="eyebrow">SECURE ACCOUNT ACCESS</p>
-            <h2>Reset your password</h2>
-            <p className="form-intro">Create a new password to continue using SSCS.</p>
-            {!token && <ErrorNotice error="This reset link is invalid or has expired. Request a new one." />}
-            <ErrorNotice error={error} />
-            <form onSubmit={submit}>
-                <Field
-                    label="New password"
-                    name="password"
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    required
-                    minLength={10}
-                    maxLength={128}
-                    autoComplete="new-password"
-                />
-                <Field
-                    label="Confirm new password"
-                    name="confirmPassword"
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    required
-                    minLength={10}
-                    maxLength={128}
-                    autoComplete="new-password"
-                />
-                <button className="button button-full" disabled={submitting || !token}>
-                    {submitting ? "Updating password…" : "Update password"}
-                </button>
-            </form>
-            <p className="auth-switch"><Link to="/forgot-password">Request another reset link</Link></p>
+    return <section className="password-reset-page">
+        <div className="password-reset-card">
+            <p className="portal-kicker"><span /> SECURE ACCOUNT RECOVERY</p>
+            <h1>Set a new password</h1>
+            <p>Enter the one-time code provided by an administrator. Codes expire after 30 minutes and can only be used once.</p>
+            {error && <p className="portal-reset-feedback is-error" role="alert">{error}</p>}
+            {success ? <div className="password-reset-success" role="status">
+                <p>{success}</p>
+                <Link to="/login">Return to sign in</Link>
+            </div> : <form onSubmit={submit}>
+                <label>
+                    Account email
+                    <input type="email" name="email" value={values.email} onChange={update} autoComplete="email" required maxLength={254} />
+                </label>
+                <label>
+                    One-time reset code
+                    <input name="code" value={values.code} onChange={update} autoComplete="one-time-code" autoCapitalize="none" spellCheck="false" required maxLength={64} />
+                </label>
+                <label>
+                    New password
+                    <input type="password" name="password" value={values.password} onChange={update} autoComplete="new-password" required minLength={10} maxLength={128} />
+                </label>
+                <label>
+                    Confirm new password
+                    <input type="password" name="confirmPassword" value={values.confirmPassword} onChange={update} autoComplete="new-password" required minLength={10} maxLength={128} />
+                </label>
+                <button type="submit" disabled={submitting}>{submitting ? "Updating password…" : "Set new password"}</button>
+            </form>}
+            <Link className="password-reset-back" to="/login">Back to sign in</Link>
         </div>
     </section>;
 }
@@ -2032,7 +2022,11 @@ export function AdminDashboardPage() {
     const [summary, setSummary] = useState(null);
     const [users, setUsers] = useState([]);
     const [reports, setReports] = useState([]);
+    const [passwordResetRequests, setPasswordResetRequests] = useState([]);
+    const [passwordResetAudit, setPasswordResetAudit] = useState([]);
+    const [issuedResetCodes, setIssuedResetCodes] = useState({});
     const [reviewingAccounts, setReviewingAccounts] = useState(() => new Set());
+    const [reviewingPasswordResetRequests, setReviewingPasswordResetRequests] = useState(() => new Set());
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
@@ -2040,17 +2034,22 @@ export function AdminDashboardPage() {
         setLoading(true);
         setError("");
         try {
-            const [counts, accounts, reportQueue] = await Promise.all([
+            const [counts, accounts, reportQueue, passwordResetQueue, resetAudit] = await Promise.all([
                 api("/admin/summary"),
                 api("/admin/users"),
                 api("/admin/reports"),
+                api("/admin/password-reset-requests"),
+                api("/admin/password-reset-audit"),
             ]);
-            if (!counts?.summary || !Array.isArray(accounts?.users) || !Array.isArray(reportQueue?.reports)) {
+            if (!counts?.summary || !Array.isArray(accounts?.users) || !Array.isArray(reportQueue?.reports)
+                || !Array.isArray(passwordResetQueue?.requests) || !Array.isArray(resetAudit?.events)) {
                 throw new Error("The server returned incomplete administrator dashboard data.");
             }
             setSummary(counts.summary);
             setUsers(accounts.users);
             setReports(reportQueue.reports);
+            setPasswordResetRequests(passwordResetQueue.requests);
+            setPasswordResetAudit(resetAudit.events);
         } catch (requestError) {
             setError(requestError.message);
         } finally {
@@ -2090,7 +2089,7 @@ export function AdminDashboardPage() {
                     ...current,
                     pending_approval_requests: Math.max(0, current.pending_approval_requests - 1),
                 } : current);
-                window.dispatchEvent(new Event("sscs:refresh-pending-approvals"));
+                window.dispatchEvent(new Event("sscs:refresh-admin-alerts"));
             }
         } catch (requestError) {
             setError(requestError.message);
@@ -2115,6 +2114,46 @@ export function AdminDashboardPage() {
                 : entry));
         } catch (requestError) {
             setError(requestError.message);
+        }
+    }
+
+    async function reviewPasswordResetRequest(resetRequest, status) {
+        setError("");
+        const requestId = String(resetRequest.id);
+        setReviewingPasswordResetRequests((current) => new Set(current).add(requestId));
+        try {
+            const result = await api(`/admin/password-reset-requests/${resetRequest.id}`, {
+                method: "PATCH",
+                body: { status },
+            });
+            if (status === "declined") {
+                setPasswordResetRequests((current) => current.filter((entry) => entry.id !== resetRequest.id));
+                setIssuedResetCodes((current) => {
+                    const next = { ...current };
+                    delete next[resetRequest.id];
+                    return next;
+                });
+            } else {
+                setPasswordResetRequests((current) => current.map((entry) => entry.id === resetRequest.id
+                    ? { ...entry, ...result.request }
+                    : entry));
+                setIssuedResetCodes((current) => ({ ...current, [resetRequest.id]: result.resetCode }));
+            }
+            if (resetRequest.status === "pending" && ["approved", "declined"].includes(status)) {
+                setSummary((current) => current ? {
+                    ...current,
+                    pending_password_reset_requests: Math.max(0, current.pending_password_reset_requests - 1),
+                } : current);
+            }
+            window.dispatchEvent(new Event("sscs:refresh-admin-alerts"));
+        } catch (requestError) {
+            setError(requestError.message);
+        } finally {
+            setReviewingPasswordResetRequests((current) => {
+                const next = new Set(current);
+                next.delete(requestId);
+                return next;
+            });
         }
     }
 
@@ -2166,6 +2205,15 @@ export function AdminDashboardPage() {
                 </li>)}
             </ul>}
         </section>}
+        {summary?.pending_password_reset_requests > 0 && <section className="admin-reset-alert" aria-label="Password reset requests require review" aria-live="polite">
+            <div className="admin-reset-alert-icon" aria-hidden="true">!</div>
+            <div>
+                <p className="admin-reset-alert-kicker">ACTION REQUIRED · ACCOUNT ACCESS</p>
+                <h2>{summary.pending_password_reset_requests} password reset request{summary.pending_password_reset_requests === 1 ? "" : "s"} need review</h2>
+                <p>Verify the requester through a trusted channel before approving. Approved codes are shown once and must be shared securely.</p>
+            </div>
+            <a href="#password-reset-queue">Review reset requests <span aria-hidden="true">↓</span></a>
+        </section>}
         <section className="admin-overview-section" aria-label="Platform metrics">
             <div className="admin-section-heading">
                 <div><p className="admin-kicker"><span /> LIVE OVERVIEW</p><h2>Platform telemetry</h2></div>
@@ -2210,6 +2258,67 @@ export function AdminDashboardPage() {
             </table></div>
             {!loading && !error && users.length === 0 && <div className="admin-empty-state"><span>◎</span><strong>No accounts in the network yet</strong><p>Registered athlete and agency accounts will appear here.</p></div>}
         </section>
+        <section className="admin-users admin-directory admin-password-reset-queue" id="password-reset-queue">
+            <div className="admin-directory-heading">
+                <div><p className="admin-kicker"><span /> ACCOUNT ACCESS</p><h2>Password reset requests</h2><p>Confirm the requester’s identity outside SSCS before approval. A generated code expires in 30 minutes and can be used once.</p></div>
+                <div className="admin-record-count"><strong>{passwordResetRequests.filter((entry) => entry.status === "pending").length.toString().padStart(2, "0")}</strong><span>PENDING<br />REQUESTS</span></div>
+            </div>
+            {passwordResetRequests.length > 0 ? <div className="admin-report-list">{passwordResetRequests.map((resetRequest) => {
+                const requestId = String(resetRequest.id);
+                const isReviewing = reviewingPasswordResetRequests.has(requestId);
+                const code = issuedResetCodes[resetRequest.id];
+                return <article className="admin-report-card password-reset-request-card" key={requestId}>
+                    <div className="admin-report-card-heading">
+                        <div>
+                            <span className={`admin-report-status is-${resetRequest.status}`}>{resetRequest.status}</span>
+                            <h3>{resetRequest.username} · {resetRequest.email}</h3>
+                        </div>
+                        <time>{formatDate(resetRequest.requested_at)}</time>
+                    </div>
+                    <p className="admin-report-meta">{resetRequest.role === "scout" ? "Scout / Agency" : resetRequest.role} account</p>
+                    {resetRequest.failed_attempts > 0 && <p className="password-reset-attempt-count">
+                        Incorrect code attempts: {resetRequest.failed_attempts} of 5{resetRequest.failed_attempts >= 5 ? " · code locked" : ""}
+                    </p>}
+                    {resetRequest.status === "pending" ? <div className="admin-report-actions">
+                        <button className="admin-manage-button admin-review-approve" onClick={() => reviewPasswordResetRequest(resetRequest, "approved")} disabled={isReviewing}>
+                            {isReviewing ? "Reviewing…" : "Approve & generate code"}
+                        </button>
+                        <button className="admin-manage-button admin-review-reject" onClick={() => reviewPasswordResetRequest(resetRequest, "declined")} disabled={isReviewing}>
+                            Decline request
+                        </button>
+                    </div> : <div className="password-reset-approved-actions">
+                        <p>{resetRequest.reset_code_expires_at
+                            ? `Code expires ${formatDate(resetRequest.reset_code_expires_at)}.`
+                            : "The prior code is expired; issue a replacement if the user still needs access."}</p>
+                        <button className="admin-manage-button" onClick={() => reviewPasswordResetRequest(resetRequest, "regenerate")} disabled={isReviewing}>
+                            {isReviewing ? "Generating…" : "Generate replacement code"}
+                        </button>
+                    </div>}
+                    {code && <div className="password-reset-code-panel" role="status">
+                        <strong>One-time code — share through a trusted channel</strong>
+                        <input aria-label={`Reset code for ${resetRequest.username}`} readOnly value={code} onFocus={(event) => event.target.select()} />
+                        <p>This code is displayed only in this admin session. Regenerating it immediately invalidates the previous code.</p>
+                    </div>}
+                </article>;
+            })}</div> : !loading && <div className="admin-empty-state"><span>◎</span><strong>No active password reset requests</strong><p>New requests from the sign-in page will appear here.</p></div>}
+        </section>
+        <section className="admin-users admin-directory admin-password-reset-audit">
+            <div className="admin-directory-heading">
+                <div><p className="admin-kicker"><span /> SECURITY HISTORY</p><h2>Password reset audit trail</h2><p>Recent reset requests, administrator decisions, failed code attempts, and completed password changes.</p></div>
+                <div className="admin-record-count"><strong>{passwordResetAudit.length.toString().padStart(2, "0")}</strong><span>RECENT<br />EVENTS</span></div>
+            </div>
+            {passwordResetAudit.length > 0 ? <div className="password-reset-audit-list">
+                {passwordResetAudit.map((event) => <article className="password-reset-audit-event" key={event.id}>
+                    <span className={`password-reset-audit-indicator is-${event.event_type}`} aria-hidden="true" />
+                    <div>
+                        <strong>{event.target_username || "Deleted account"} · {event.target_email || "Account unavailable"}</strong>
+                        <p>{passwordResetAuditLabel(event.event_type, event.details)}</p>
+                        {event.actor_username && <small>Admin: {event.actor_username}</small>}
+                    </div>
+                    <time>{formatDate(event.created_at)}</time>
+                </article>)}
+            </div> : !loading && <div className="admin-empty-state"><span>◎</span><strong>No password reset activity yet</strong><p>Requests and review actions will be recorded here.</p></div>}
+        </section>
         <section className="admin-users admin-directory admin-report-queue">
             <div className="admin-directory-heading">
                 <div><p className="admin-kicker"><span /> COMMUNITY SAFETY</p><h2>Account &amp; message reports</h2><p>Review reports submitted by users. Reports do not automatically suspend accounts.</p></div>
@@ -2232,6 +2341,19 @@ export function AdminDashboardPage() {
             </article>)}</div> : !loading && <div className="admin-empty-state"><span>◎</span><strong>No reports to review</strong><p>New user reports will appear here.</p></div>}
         </section>
     </div>;
+}
+
+function passwordResetAuditLabel(eventType, details = {}) {
+    const labels = {
+        requested: "Password reset requested",
+        approved: "Request approved and one-time code issued",
+        declined: "Request declined",
+        code_regenerated: "One-time code regenerated",
+        code_attempt_failed: `Incorrect code attempt ${details.failedAttempts ?? ""} of 5`.trim(),
+        code_locked: "Code locked after five incorrect attempts",
+        reset_completed: "Password changed successfully",
+    };
+    return labels[eventType] || "Password reset activity";
 }
 
 function AdminAccountDetails({ account }) {

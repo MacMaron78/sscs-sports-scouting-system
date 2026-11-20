@@ -24,7 +24,7 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-In `.env`, set `PGPASSWORD` to the PostgreSQL password, and replace `JWT_SECRET` with a random string of at least 32 characters. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM` with your email provider's SMTP settings to enable password recovery. Keep `.env` private and do not commit it. The defaults connect to database `sscs_db` as `postgres` on `localhost:5432` and create the isolated `sscs_api` schema.
+In `.env`, set `PGPASSWORD` to the PostgreSQL password, and replace `JWT_SECRET` with a random string of at least 32 characters. Keep `.env` private and do not commit it. The defaults connect to database `sscs_db` as `postgres` on `localhost:5432` and create the isolated `sscs_api` schema.
 
 Then run:
 
@@ -57,9 +57,13 @@ After the one-time setup above (including `npm install` in both folders and conf
 
 The script opens a separate PowerShell window for each server. Open `http://localhost:5173` in your browser; close either server window to stop that server.
 
+## Password recovery
+
+Users can request an administrator-reviewed password reset from the sign-in page. Admins review requests in the dashboard and should independently verify the requester through a trusted channel before approving. Approval generates a one-time code that expires after 30 minutes; the admin shares it with the user outside SSCS, and the user sets a new password on the reset page. Regenerating a code invalidates the previous one and resets its failed-attempt counter. Five incorrect code attempts lock the code until an admin regenerates it. The admin dashboard records requests, approvals, declines, code activity, and completed resets. SSCS does not send reset emails.
+
 ## Proposal feature coverage
 
-The React/Node application supports athlete and agency registration, login and role checks, email-based password recovery; athlete profile editing with profile-photo uploads, competition level, multi-sport career history, performance information and external video links; scout athlete search by sport, position, age, competition level and location; private agency shortlists; direct messaging with user blocking and message/account reporting; responsive layouts; admin account activation and report review controls; and summary counts for athletes, agencies, shortlists and messages.
+The React/Node application supports athlete and agency registration, login and role checks; administrator-reviewed password recovery; athlete profile editing with profile-photo uploads, competition level, multi-sport career history, performance information and external video links; scout athlete search by sport, position, age, competition level and location; private agency shortlists; direct messaging with user blocking and message/account reporting; responsive layouts; admin account activation and report review controls; and summary counts for athletes, agencies, shortlists and messages.
 
 ## Project completion and evaluation materials
 
@@ -108,4 +112,4 @@ Users can block another account from the inbox. Blocking prevents new messages i
 
 ## Login portals
 
-Open `/login/` and select Athlete or Scout & Agency directly on the login form. Sign in with the email address used when registering and your password. The selected portal checks the account's database role before creating a session; using the other account type displays a message directing the user to the correct portal. Successful sign-in opens the matching role-specific dashboard and navigation menu. Dedicated `/login/athlete/` and `/login/scout/` URLs are also available. Administrators can use the administrator portal link on the login form. Use **Forgot your password?** to request a one-time email link, valid for 60 minutes; SMTP settings are required. Account roles remain `athlete` and `scout` in the database.
+Open `/login/` and select Athlete or Scout & Agency directly on the login form. Sign in with the email address used when registering and your password. The selected portal checks the account's database role before creating a session; using the other account type displays a message directing the user to the correct portal. Successful sign-in opens the matching role-specific dashboard and navigation menu. Dedicated `/login/athlete/` and `/login/scout/` URLs are also available. Administrators can use the administrator portal link on the login form. Account roles remain `athlete` and `scout` in the database.

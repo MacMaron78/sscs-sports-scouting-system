@@ -4,24 +4,48 @@ import pg from "pg";
 
 const { Pool } = pg;
 
-const requiredEnvironment = ["PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD"];
-for (const name of requiredEnvironment) {
+
+const hasDatabaseUrl = Boolean(process.env.DATABASE_URL);
+
+if (!hasDatabaseUrl) {
+  const requiredEnvironment = [
+    "PGHOST",
+    "PGPORT",
+    "PGDATABASE",
+    "PGUSER",
+    "PGPASSWORD"
+  ];
+
+  for (const name of requiredEnvironment) {
     if (!process.env[name]) {
-        throw new Error(`Missing required environment variable ${name}. Copy .env.example to .env and configure it.`);
+      throw new Error(
+        `Missing required environment variable ${name}.`
+      );
     }
+  }
 }
 
 export const pool = new Pool({
-    host: process.env.PGHOST,
-    port: Number(process.env.PGPORT),
-    database: process.env.PGDATABASE,
-    user: process.env.PGUSER,
-    password: process.env.PGPASSWORD,
-    ssl: process.env.PGSSL === "true" ? {} : undefined,
-    max: 10,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
+  ...(hasDatabaseUrl
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        ssl: { rejectUnauthorized: false }
+      }
+    : {
+        host: process.env.PGHOST,
+        port: Number(process.env.PGPORT),
+        database: process.env.PGDATABASE,
+        user: process.env.PGUSER,
+        password: process.env.PGPASSWORD,
+        ssl: process.env.PGSSL === "true"
+          ? { rejectUnauthorized: false }
+          : undefined
+      }),
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000
 });
+
 
 pool.on("error", (error) => {
     console.error("Unexpected PostgreSQL pool error:", error);

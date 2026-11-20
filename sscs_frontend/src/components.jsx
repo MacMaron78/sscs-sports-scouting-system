@@ -167,12 +167,18 @@ export function Layout() {
         const checkPendingApprovals = async () => {
             try {
                 const result = await api("/admin/summary");
-                if (!result?.summary || !Number.isInteger(result.summary.pending_approval_requests)) {
-                    throw new Error("The server returned an invalid pending approval count.");
+                if (!result?.summary
+                    || !Number.isInteger(result.summary.pending_approval_requests)
+                    || !Number.isInteger(result.summary.pending_password_reset_requests)) {
+                    throw new Error("The server returned invalid administrator request counts.");
                 }
-                if (active) setPendingApprovalCount(result.summary.pending_approval_requests);
+                if (active) {
+                    setPendingApprovalCount(
+                        result.summary.pending_approval_requests + result.summary.pending_password_reset_requests,
+                    );
+                }
             } catch (error) {
-                console.error("Could not check for pending account approvals:", error);
+                console.error("Could not check for pending administrator requests:", error);
             }
         };
 
@@ -181,16 +187,16 @@ export function Layout() {
         const handleVisibility = () => {
             if (document.visibilityState === "visible") void checkPendingApprovals();
         };
-        const handleApprovalChange = () => void checkPendingApprovals();
+        const handleAdminRequestChange = () => void checkPendingApprovals();
         window.addEventListener("focus", checkPendingApprovals);
-        window.addEventListener("sscs:refresh-pending-approvals", handleApprovalChange);
+        window.addEventListener("sscs:refresh-admin-alerts", handleAdminRequestChange);
         document.addEventListener("visibilitychange", handleVisibility);
 
         return () => {
             active = false;
             window.clearInterval(intervalId);
             window.removeEventListener("focus", checkPendingApprovals);
-            window.removeEventListener("sscs:refresh-pending-approvals", handleApprovalChange);
+            window.removeEventListener("sscs:refresh-admin-alerts", handleAdminRequestChange);
             document.removeEventListener("visibilitychange", handleVisibility);
         };
     }, [user?.id, user?.role]);
@@ -253,7 +259,7 @@ export function Layout() {
                         <NavLink to="/inbox"><span className="sidebar-nav-icon"><SidebarIcon name="inbox" /></span>Inbox{unreadCount > 0 && <span className="sidebar-unread-badge" aria-label={`${unreadCount} unread messages`}>{unreadCount > 99 ? "99+" : unreadCount}</span>}</NavLink>
                         <NavLink to="/profile"><span className="sidebar-nav-icon"><SidebarIcon name="profile" /></span>Agency profile</NavLink>
                     </>}
-                    {user?.role === "admin" && <NavLink to="/admin"><span className="sidebar-nav-icon"><SidebarIcon name="reports" /></span>Admin console{pendingApprovalCount > 0 && <span className="sidebar-approval-badge" aria-label={`${pendingApprovalCount} accounts awaiting approval`}>{pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}</span>}</NavLink>}
+                    {user?.role === "admin" && <NavLink to="/admin"><span className="sidebar-nav-icon"><SidebarIcon name="reports" /></span>Admin console{pendingApprovalCount > 0 && <span className="sidebar-approval-badge" aria-label={`${pendingApprovalCount} administrator requests need review`}>{pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}</span>}</NavLink>}
                 </nav>
                 <div className="sidebar-footer">
                     <span className="sidebar-footer-mark">S</span>

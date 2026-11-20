@@ -1,14 +1,13 @@
 import bcrypt from "bcryptjs";
 import cookieParser from "cookie-parser";
 import cors from "cors";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import express from "express";
 import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { clearSessionCookie, requireAuth, requireRole, setSessionCookie } from "./auth.js";
-import { createPasswordResetEmailSender } from "./mailer.js";
 import { normalizeAgencyUpdate, normalizeAthleteUpdate, normalizeRegistration, normalizeSearch } from "./validation.js";
 
 const schema = process.env.PGSCHEMA || "sscs_api";
@@ -42,6 +41,19 @@ function parseId(value) {
     return Number.isSafeInteger(id) ? id : null;
 }
 
+function createResetCode() {
+    const code = randomBytes(32).toString("base64url");
+    return {
+        code,
+        hash: createHash("sha256").update(code).digest("hex"),
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    };
+}
+
+function hashResetCode(code) {
+    return createHash("sha256").update(code).digest("hex");
+}
+
 function setUpdatedFields(fields, startIndex = 1) {
     const entries = Object.entries(fields);
     return {
@@ -53,7 +65,7 @@ function setUpdatedFields(fields, startIndex = 1) {
     };
 }
 
-export function createApp(databasePool, { sendPasswordResetEmail = createPasswordResetEmailSender() } = {}) {
+export function createApp(databasePool) {
     const app = express();
     const frontendOrigin = process.env.FRONTEND_ORIGIN || process.env.RENDER_EXTERNAL_URL || "http://localhost:5173";
     const allowedFrontendOrigins = new Set([frontendOrigin]);
@@ -126,14 +138,14 @@ export function createApp(databasePool, { sendPasswordResetEmail = createPasswor
         limit: 5,
         standardHeaders: "draft-7",
         legacyHeaders: false,
-        message: { error: "Too many password-reset requests. Please wait and try again." },
+        message: { error: "Too many reset requests. Please wait and try again." },
     });
-    const passwordResetCompleteLimiter = rateLimit({
+    const passwordResetCompletionLimiter = rateLimit({
         windowMs: 15 * 60 * 1000,
         limit: 10,
         standardHeaders: "draft-7",
         legacyHeaders: false,
-        message: { error: "Too many password-reset attempts. Please wait and try again." },
+        message: { error: "Too many reset attempts. Please wait and try again." },
     });
     app.post("/api/auth/register", authLimiter, async (request, response, next) => {
         let registration;
@@ -200,7 +212,7 @@ export function createApp(databasePool, { sendPasswordResetEmail = createPasswor
         try {
             const result = await databasePool.query(
                 `SELECT id, username, email, role, is_active, password_hash,
-                        profile_photo IS NOT NULL AS has_profile_photo
+                        token_version, profile_photo IS NOT NULL AS has_profile_photo
                  FROM ${db}.users
                  WHERE LOWER(email) = LOWER($1) OR LOWER(username) = LOWER($1)
                  ORDER BY CASE WHEN LOWER(email) = LOWER($1) THEN 0 ELSE 1 END
@@ -224,95 +236,151 @@ export function createApp(databasePool, { sendPasswordResetEmail = createPasswor
         }
     });
 
-    app.post("/api/auth/password-reset/request", passwordResetRequestLimiter, async (request, response, next) => {
-        if (!sendPasswordResetEmail) {
-            return apiError(response, 503, "Password recovery is not configured. Please contact support.");
-        }
-
-        const email = typeof request.body?.email === "string" ? request.body.email.trim().toLowerCase() : "";
+    app.post("/api/auth/password-reset-requests", passwordResetRequestLimiter, async (request, response, next) => {
+        const email = String(request.body?.email ?? "").trim().toLowerCase();
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
-            return apiError(response, 400, "Enter a valid email address.");
+            return apiError(response, 400, "Enter a valid account email address.");
         }
 
+        let client;
+        let transactionStarted = false;
         try {
-            const result = await databasePool.query(
-                `SELECT id, email FROM ${db}.users
-                 WHERE LOWER(email) = LOWER($1) AND is_active = TRUE
-                 LIMIT 1`,
+            client = await databasePool.connect();
+            await client.query("BEGIN");
+            transactionStarted = true;
+            const account = await client.query(
+                `SELECT id FROM ${db}.users WHERE LOWER(email) = LOWER($1) AND is_active = TRUE LIMIT 1`,
                 [email],
             );
-            const user = result.rows[0];
-            if (user) {
-                const token = randomBytes(32).toString("base64url");
-                const tokenHash = createHash("sha256").update(token).digest("hex");
-                const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
-
-                await databasePool.query(
-                    `DELETE FROM ${db}.password_reset_tokens WHERE user_id = $1`,
-                    [user.id],
+            if (account.rows[0]) {
+                await client.query(
+                    `UPDATE ${db}.password_reset_requests
+                     SET status = 'superseded', reset_code_hash = NULL, reset_code_expires_at = NULL
+                     WHERE user_id = $1 AND status = 'approved'`,
+                    [account.rows[0].id],
                 );
-                await databasePool.query(
-                    `INSERT INTO ${db}.password_reset_tokens (token_hash, user_id, expires_at)
-                     VALUES ($1, $2, $3)`,
-                    [tokenHash, user.id, expiresAt],
+                const requestRecord = await client.query(
+                    `INSERT INTO ${db}.password_reset_requests (user_id)
+                     VALUES ($1)
+                     ON CONFLICT (user_id) WHERE status = 'pending'
+                     DO UPDATE SET requested_at = NOW()
+                     RETURNING id`,
+                    [account.rows[0].id],
                 );
-
-                const resetUrl = new URL("/reset-password", frontendOrigin);
-                resetUrl.hash = new URLSearchParams({ token }).toString();
-                void Promise.resolve()
-                    .then(() => sendPasswordResetEmail({ to: user.email, resetUrl: resetUrl.toString() }))
-                    .catch(async (error) => {
-                        console.error("Password-reset email delivery failed:", error);
-                        try {
-                            await databasePool.query(
-                                `DELETE FROM ${db}.password_reset_tokens WHERE token_hash = $1`,
-                                [tokenHash],
-                            );
-                        } catch (cleanupError) {
-                            console.error("Failed to revoke an undelivered password-reset link:", cleanupError);
-                        }
-                    });
+                await client.query(
+                    `INSERT INTO ${db}.password_reset_audit
+                        (reset_request_id, user_id, event_type)
+                     VALUES ($1, $2, 'requested')`,
+                    [requestRecord.rows[0].id, account.rows[0].id],
+                );
             }
-
+            await client.query("COMMIT");
+            transactionStarted = false;
             return response.status(202).json({
-                message: "If an active account exists for that email, password-reset instructions will be sent shortly.",
+                message: "If an active account matches that email, a reset request has been sent to an administrator for review.",
             });
         } catch (error) {
+            if (transactionStarted) await client.query("ROLLBACK");
             return next(error);
+        } finally {
+            client?.release();
         }
     });
 
-    app.post("/api/auth/password-reset/complete", passwordResetCompleteLimiter, async (request, response, next) => {
-        const token = request.body?.token;
-        const password = request.body?.password;
-        if (typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token)) {
-            return apiError(response, 400, "This reset link is invalid or has expired. Request a new one.");
-        }
-        if (typeof password !== "string" || password.length < 10 || password.length > 128) {
-            return apiError(response, 400, "Password must be between 10 and 128 characters.");
+    app.post("/api/auth/password-reset", passwordResetCompletionLimiter, async (request, response, next) => {
+        const email = String(request.body?.email ?? "").trim().toLowerCase();
+        const code = String(request.body?.code ?? "").trim().slice(0, 256);
+        const password = String(request.body?.password ?? "");
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+            return apiError(response, 400, "Enter a valid account email address.");
         }
 
+        let client;
+        let transactionStarted = false;
         try {
-            const passwordHash = await bcrypt.hash(password, 12);
-            const tokenHash = createHash("sha256").update(token).digest("hex");
-            const result = await databasePool.query(
-                `WITH consumed_token AS (
-                    DELETE FROM ${db}.password_reset_tokens
-                    WHERE token_hash = $1 AND expires_at > NOW()
-                    RETURNING user_id
-                 )
-                 UPDATE ${db}.users
-                 SET password_hash = $2
-                 WHERE id = (SELECT user_id FROM consumed_token) AND is_active = TRUE
-                 RETURNING id`,
-                [tokenHash, passwordHash],
+            client = await databasePool.connect();
+            await client.query("BEGIN");
+            transactionStarted = true;
+            const requestResult = await client.query(
+                `SELECT r.id, r.user_id, r.reset_code_hash, r.failed_attempts
+                 FROM ${db}.password_reset_requests r
+                 JOIN ${db}.users u ON u.id = r.user_id
+                 WHERE LOWER(u.email) = LOWER($1) AND u.is_active = TRUE
+                   AND r.status = 'approved' AND r.reset_code_expires_at > NOW()
+                   AND r.failed_attempts < 5
+                 ORDER BY r.requested_at DESC
+                 LIMIT 1
+                 FOR UPDATE OF r, u`,
+                [email],
             );
-            if (!result.rows[0]) {
-                return apiError(response, 400, "This reset link is invalid or has expired. Request a new one.");
+            const resetRequest = requestResult.rows[0];
+            const suppliedHash = hashResetCode(code);
+            const storedHash = resetRequest?.reset_code_hash;
+            const validCode = typeof storedHash === "string"
+                && storedHash.length === suppliedHash.length
+                && timingSafeEqual(Buffer.from(storedHash), Buffer.from(suppliedHash));
+            if (!validCode) {
+                if (resetRequest) {
+                    const failedAttempts = Number(resetRequest.failed_attempts) + 1;
+                    const attemptLimitReached = failedAttempts >= 5;
+                    await client.query(
+                        `UPDATE ${db}.password_reset_requests
+                         SET failed_attempts = failed_attempts + 1,
+                             reset_code_hash = CASE WHEN failed_attempts + 1 >= 5 THEN NULL ELSE reset_code_hash END,
+                             reset_code_expires_at = CASE WHEN failed_attempts + 1 >= 5 THEN NULL ELSE reset_code_expires_at END
+                         WHERE id = $1`,
+                        [resetRequest.id],
+                    );
+                    await client.query(
+                        `INSERT INTO ${db}.password_reset_audit
+                            (reset_request_id, user_id, event_type, details)
+                         VALUES ($1, $2, $3, $4::jsonb)`,
+                        [
+                            resetRequest.id,
+                            resetRequest.user_id,
+                            attemptLimitReached ? "code_locked" : "code_attempt_failed",
+                            JSON.stringify({ failedAttempts }),
+                        ],
+                    );
+                    await client.query("COMMIT");
+                } else {
+                    await client.query("ROLLBACK");
+                }
+                transactionStarted = false;
+                return apiError(response, 400, "The reset code is invalid or expired.");
             }
-            return response.json({ message: "Your password has been updated. You can now log in." });
+            if (password.length < 10 || password.length > 128) {
+                await client.query("ROLLBACK");
+                transactionStarted = false;
+                return apiError(response, 400, "Password must be between 10 and 128 characters.");
+            }
+
+            const passwordHash = await bcrypt.hash(password, 12);
+            await client.query(
+                `UPDATE ${db}.users SET password_hash = $1, token_version = token_version + 1 WHERE id = $2`,
+                [passwordHash, resetRequest.user_id],
+            );
+            await client.query(
+                `UPDATE ${db}.password_reset_requests
+                 SET status = 'completed', reset_code_hash = NULL, reset_code_expires_at = NULL,
+                     completed_at = NOW()
+                 WHERE id = $1`,
+                [resetRequest.id],
+            );
+            await client.query(
+                `INSERT INTO ${db}.password_reset_audit
+                    (reset_request_id, user_id, event_type)
+                 VALUES ($1, $2, 'reset_completed')`,
+                [resetRequest.id, resetRequest.user_id],
+            );
+            await client.query("COMMIT");
+            transactionStarted = false;
+            return response.json({ message: "Your password has been updated. Please sign in with your new password." });
         } catch (error) {
+            if (transactionStarted) await client.query("ROLLBACK");
             return next(error);
+        } finally {
+            client?.release();
         }
     });
 
@@ -993,11 +1061,145 @@ export function createApp(databasePool, { sendPasswordResetEmail = createPasswor
                     (SELECT COUNT(*)::int FROM ${db}.messages) AS messages,
                     (SELECT COUNT(*)::int FROM ${db}.users
                      WHERE role IN ('athlete', 'scout') AND verification_status = 'pending')
-                     AS pending_approval_requests`,
+                     AS pending_approval_requests,
+                    (SELECT COUNT(*)::int FROM ${db}.password_reset_requests
+                     WHERE status = 'pending') AS pending_password_reset_requests`,
             );
             return response.json({ summary: result.rows[0] });
         } catch (error) {
             return next(error);
+        }
+    });
+
+    app.get("/api/admin/password-reset-requests", authenticate, requireRole("admin"), async (request, response, next) => {
+        try {
+            const result = await databasePool.query(
+                `SELECT r.id, r.user_id, u.username, u.email, u.role,
+                        r.status, r.requested_at, r.reviewed_at, r.reset_code_expires_at,
+                        r.failed_attempts
+                 FROM ${db}.password_reset_requests r
+                 JOIN ${db}.users u ON u.id = r.user_id
+                 WHERE r.status IN ('pending', 'approved') AND u.is_active = TRUE
+                 ORDER BY CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END, r.requested_at ASC
+                 LIMIT 100`,
+            );
+            return response.json({ requests: result.rows });
+        } catch (error) {
+            return next(error);
+        }
+    });
+
+    app.get("/api/admin/password-reset-audit", authenticate, requireRole("admin"), async (request, response, next) => {
+        try {
+            const result = await databasePool.query(
+                `SELECT e.id, e.reset_request_id, e.event_type, e.details, e.created_at,
+                        u.username AS target_username, u.email AS target_email,
+                        actor.username AS actor_username
+                 FROM ${db}.password_reset_audit e
+                 LEFT JOIN ${db}.users u ON u.id = e.user_id
+                 LEFT JOIN ${db}.users actor ON actor.id = e.actor_id
+                 ORDER BY e.created_at DESC
+                 LIMIT 100`,
+            );
+            return response.json({ events: result.rows });
+        } catch (error) {
+            return next(error);
+        }
+    });
+
+    app.patch("/api/admin/password-reset-requests/:id", authenticate, requireRole("admin"), async (request, response, next) => {
+        const id = parseId(request.params.id);
+        if (!id) return apiError(response, 400, "Invalid password reset request identifier.");
+        const action = request.body?.status;
+        if (!["approved", "declined", "regenerate"].includes(action)) {
+            return apiError(response, 400, "Choose approve, decline, or regenerate.");
+        }
+
+        let client;
+        let transactionStarted = false;
+        try {
+            client = await databasePool.connect();
+            await client.query("BEGIN");
+            transactionStarted = true;
+            if (action === "declined") {
+                const result = await client.query(
+                    `UPDATE ${db}.password_reset_requests
+                     SET status = 'declined', reviewed_at = NOW(), reviewed_by = $1,
+                         reset_code_hash = NULL, reset_code_expires_at = NULL
+                     WHERE id = $2 AND status = 'pending'
+                     RETURNING id, user_id, status, requested_at, reviewed_at`,
+                    [request.user.id, id],
+                );
+                if (!result.rows[0]) {
+                    await client.query("ROLLBACK");
+                    transactionStarted = false;
+                    const existing = await databasePool.query(
+                        `SELECT id, status FROM ${db}.password_reset_requests WHERE id = $1`,
+                        [id],
+                    );
+                    if (!existing.rows[0]) return apiError(response, 404, "Password reset request not found.");
+                    return apiError(response, 409, "Only pending password reset requests can be declined.");
+                }
+                await client.query(
+                    `INSERT INTO ${db}.password_reset_audit
+                        (reset_request_id, user_id, actor_id, event_type)
+                     VALUES ($1, $2, $3, 'declined')`,
+                    [id, result.rows[0].user_id, request.user.id],
+                );
+                await client.query("COMMIT");
+                transactionStarted = false;
+                return response.json({ request: result.rows[0] });
+            }
+
+            const reset = createResetCode();
+            const allowedStatus = action === "approved" ? "pending" : "approved";
+            const result = await client.query(
+                `UPDATE ${db}.password_reset_requests r
+                 SET status = 'approved', reviewed_at = NOW(), reviewed_by = $1,
+                     reset_code_hash = $2, reset_code_expires_at = $3, failed_attempts = 0
+                 WHERE r.id = $4 AND r.status = $5
+                   AND EXISTS (SELECT 1 FROM ${db}.users u WHERE u.id = r.user_id AND u.is_active = TRUE)
+                 RETURNING r.id, r.user_id, r.status, r.requested_at, r.reviewed_at, r.reset_code_expires_at`,
+                [request.user.id, reset.hash, reset.expiresAt, id, allowedStatus],
+            );
+            if (!result.rows[0]) {
+                await client.query("ROLLBACK");
+                transactionStarted = false;
+                const existing = await databasePool.query(
+                    `SELECT r.id, r.status, u.is_active
+                     FROM ${db}.password_reset_requests r
+                     JOIN ${db}.users u ON u.id = r.user_id
+                     WHERE r.id = $1`,
+                    [id],
+                );
+                if (!existing.rows[0]) return apiError(response, 404, "Password reset request not found.");
+                return apiError(response, 409, "This request cannot be approved or regenerated because it is no longer available.");
+            }
+            await client.query(
+                `INSERT INTO ${db}.password_reset_audit
+                    (reset_request_id, user_id, actor_id, event_type)
+                 VALUES ($1, $2, $3, $4)`,
+                [
+                    id,
+                    result.rows[0].user_id,
+                    request.user.id,
+                    action === "approved" ? "approved" : "code_regenerated",
+                ],
+            );
+            await client.query("COMMIT");
+            transactionStarted = false;
+            return response.json({
+                request: result.rows[0],
+                resetCode: reset.code,
+                message: action === "approved"
+                    ? "Request approved. Share this one-time code with the user through a trusted channel."
+                    : "A replacement code was issued. The previous code is now invalid.",
+            });
+        } catch (error) {
+            if (transactionStarted) await client.query("ROLLBACK");
+            return next(error);
+        } finally {
+            client?.release();
         }
     });
 

@@ -10,11 +10,10 @@ import {
     AuthPage,
     HomePage,
     InboxPage,
-    ForgotPasswordPage,
     LoginPortalPage,
     NewMessagePage,
+    PasswordResetPage,
     ProfilePage,
-    ResetPasswordPage,
     ScoutDashboardPage,
     ShortlistPage,
 } from "./pages";
@@ -27,8 +26,7 @@ export default function App() {
             <Route path="login/athlete" element={<LoginPortalPage role="athlete" />} />
             <Route path="login/scout" element={<LoginPortalPage role="scout" />} />
             <Route path="login/admin" element={<LoginPortalPage role="admin" />} />
-            <Route path="forgot-password" element={<ForgotPasswordPage />} />
-            <Route path="reset-password" element={<ResetPasswordPage />} />
+            <Route path="reset-password" element={<PasswordResetPage />} />
             <Route path="register" element={<AuthPage mode="register" />} />
             <Route element={<ProtectedRoute />}>
                 <Route path="inbox" element={<InboxPage />} />

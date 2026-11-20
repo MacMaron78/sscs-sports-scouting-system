@@ -189,8 +189,6 @@ p { line-height: 1.65; }
 .button-full { margin-top: 9px; }
 .auth-switch { margin: 18px 0 0; color: var(--muted); font-size: .88rem; text-align: center; }
 .auth-switch a { color: var(--primary); font-weight: 700; }
-.forgot-password { margin: -13px 0 18px; font-size: .9rem; text-align: right; }
-.forgot-password a { color: #2563eb; font-weight: 700; }
 .auth-card .form-field { margin-bottom: 12px; }
 
 .form-page { max-width: 900px; margin: 0 auto; }
@@ -8475,6 +8473,189 @@ form.portal-form {
 
 @media (prefers-reduced-motion: reduce) {
     .sidebar-approval-badge { animation: none; }
+}
+
+.portal-reset-options {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 15px;
+    font-size: .82rem;
+}
+
+.portal-reset-options button,
+.portal-reset-options a,
+.password-reset-back {
+    border: 0;
+    background: none;
+    color: #1d4ed8;
+    font: inherit;
+    font-weight: 700;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.portal-reset-options button:hover,
+.portal-reset-options a:hover,
+.password-reset-back:hover { text-decoration: underline; }
+
+.portal-reset-request,
+.password-reset-card {
+    width: min(100%, 560px);
+    margin: 18px auto 0;
+    padding: 22px;
+    border: 1px solid #dce7f3;
+    border-radius: 18px;
+    background: #fff;
+    box-shadow: 0 16px 42px rgb(23 37 84 / 9%);
+}
+
+.portal-reset-request h2,
+.password-reset-card h1 {
+    margin: 0 0 8px;
+    color: #172b4d;
+    font-size: 1.25rem;
+}
+
+.portal-reset-request > p,
+.password-reset-card > p:not(.portal-kicker) {
+    margin: 0 0 16px;
+    color: #5b6b82;
+    font-size: .88rem;
+    line-height: 1.6;
+}
+
+.portal-reset-request label,
+.password-reset-card label {
+    display: grid;
+    gap: 7px;
+    margin-top: 13px;
+    color: #34445f;
+    font-size: .85rem;
+    font-weight: 700;
+}
+
+.portal-reset-request input,
+.password-reset-card input {
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    border: 1px solid #cbd6e5;
+    border-radius: 10px;
+    background: #fff;
+    color: #172b4d;
+    font: inherit;
+}
+
+.portal-reset-request button[type="submit"],
+.password-reset-card button[type="submit"] {
+    width: 100%;
+    min-height: 45px;
+    margin-top: 16px;
+    border: 0;
+    border-radius: 10px;
+    background: #1d4ed8;
+    color: #fff;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.portal-reset-request button:disabled,
+.password-reset-card button:disabled { cursor: wait; opacity: .65; }
+
+.portal-reset-feedback {
+    margin: 12px 0;
+    padding: 10px 12px;
+    border: 1px solid #b9ead7;
+    border-radius: 10px;
+    background: #f0faf4;
+    color: #126345;
+    font-size: .84rem;
+    line-height: 1.5;
+}
+
+.portal-reset-feedback.is-error {
+    border-color: #efc3bd;
+    background: #fff6f4;
+    color: #a52e24;
+}
+
+.password-reset-page {
+    min-height: calc(100vh - 150px);
+    padding: clamp(24px, 6vw, 72px) 18px;
+    background: radial-gradient(ellipse at 50% 0%, #e8f0ff, #f8faff 65%);
+}
+
+.password-reset-card { margin: 0 auto; }
+.password-reset-card .portal-kicker { color: #2563eb; }
+.password-reset-success p { color: #126345; line-height: 1.55; }
+.password-reset-success a { color: #1d4ed8; font-weight: 750; }
+.password-reset-back { display: inline-block; margin-top: 18px; font-size: .84rem; }
+
+.admin-reset-alert {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 15px;
+    margin-top: 16px;
+    padding: 18px 20px;
+    border: 1px solid #f0cf95;
+    border-left: 4px solid #d58a13;
+    border-radius: 16px;
+    background: linear-gradient(110deg, #fff9eb, #fff 72%);
+    box-shadow: 0 8px 24px rgb(125 83 19 / 7%);
+}
+
+.admin-reset-alert-icon {
+    display: grid;
+    width: 40px;
+    height: 40px;
+    place-items: center;
+    border: 1px solid #efd59f;
+    border-radius: 13px;
+    background: #fff;
+    color: #a86500;
+    font-size: 1.2rem;
+    font-weight: 900;
+}
+
+.admin-reset-alert-kicker { margin: 0 0 4px; color: #94600e; font-size: .66rem; font-weight: 850; letter-spacing: .12em; }
+.admin-reset-alert h2 { margin: 0; color: #4c3510; font-size: 1.05rem; }
+.admin-reset-alert p:not(.admin-reset-alert-kicker) { margin: 5px 0 0; color: #76613c; font-size: .8rem; line-height: 1.5; }
+.admin-reset-alert > a { color: #83520a; font-size: .8rem; font-weight: 800; white-space: nowrap; }
+.password-reset-approved-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.password-reset-approved-actions p { margin: 0; color: #71819a; font-size: .8rem; }
+.password-reset-attempt-count { margin: 0; color: #a52e24; font-size: .8rem; font-weight: 750; }
+.password-reset-code-panel { display: grid; gap: 8px; padding: 13px; border: 1px solid #b9d1f6; border-radius: 11px; background: #f4f8ff; }
+.password-reset-code-panel strong { color: #243b5d; font-size: .82rem; }
+.password-reset-code-panel input { width: 100%; padding: 10px; border: 1px solid #cbd6e5; border-radius: 8px; background: #fff; color: #172b4d; font: 700 .9rem ui-monospace, monospace; }
+.password-reset-code-panel p { margin: 0; color: #5b6b82; font-size: .76rem; line-height: 1.5; }
+.password-reset-audit-list { display: grid; gap: 8px; padding: 0 18px 18px; }
+.password-reset-audit-event { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid #e2eaf4; border-radius: 11px; background: #fff; }
+.password-reset-audit-indicator { width: 9px; height: 9px; border-radius: 50%; background: #2563eb; }
+.password-reset-audit-indicator.is-declined,
+.password-reset-audit-indicator.is-code_locked,
+.password-reset-audit-indicator.is-code_attempt_failed { background: #d14335; }
+.password-reset-audit-indicator.is-reset_completed { background: #14845e; }
+.password-reset-audit-event strong { color: #243b5d; font-size: .82rem; }
+.password-reset-audit-event p { margin: 3px 0 0; color: #526581; font-size: .78rem; }
+.password-reset-audit-event small,
+.password-reset-audit-event time { color: #71819a; font-size: .73rem; }
+.password-reset-audit-event small { display: block; margin-top: 3px; }
+
+@media (max-width: 700px) {
+    .admin-reset-alert { grid-template-columns: 40px minmax(0, 1fr); gap: 12px; }
+    .admin-reset-alert > a { grid-column: 2; }
+}
+
+@media (max-width: 480px) {
+    .portal-reset-options { align-items: center; flex-direction: column; gap: 9px; }
+    .portal-reset-request,
+    .password-reset-card { padding: 18px; }
+    .password-reset-approved-actions { align-items: flex-start; flex-direction: column; }
+    .password-reset-audit-event { grid-template-columns: 10px minmax(0, 1fr); }
+    .password-reset-audit-event time { grid-column: 2; }
 }
 
 .topbar-photo-control {
