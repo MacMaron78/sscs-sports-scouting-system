@@ -10,7 +10,7 @@ await initializeDatabase(pool);
 await pool.query("SELECT 1");
 
 const port = Number(process.env.PORT || 5000);
-const host = process.env.HOST || "localhost";
+const host = "0.0.0.0";
 const app = createApp(pool);
 const server = app.listen(port, host, () => {
     console.log(`SSCS application listening on ${host}:${port}`);
