@@ -1,0 +1,53 @@
+{% extends "core/base.html" %}
+{% block title %}Find athletes · SSCS{% endblock %}
+{% block content %}
+    <p class="eyebrow">Scouting workspace</p>
+    <h1>Find your next athlete</h1>
+    <p class="muted">Filter athlete profiles and save promising talent to your shortlist.</p>
+    <form class="panel" method="get">
+        {{ form.non_field_errors }}
+        <div class="filter-grid">
+            <div>{{ form.sport.label_tag }}{{ form.sport }}{{ form.sport.errors }}</div>
+            <div>{{ form.position.label_tag }}{{ form.position }}{{ form.position.errors }}</div>
+            <div>{{ form.age.label_tag }}{{ form.age }}{{ form.age.errors }}</div>
+            <div>{{ form.location.label_tag }}{{ form.location }}{{ form.location.errors }}</div>
+        </div>
+        <div class="filter-actions">
+            <button type="submit">Search athletes</button>
+            <a class="button button-secondary" href="{% url 'athlete_search' %}">Clear filters</a>
+        </div>
+    </form>
+
+    {% if form.is_bound and form.is_valid %}
+        <div class="section-heading"><div><p class="eyebrow">Search results</p><h2>Athletes</h2></div></div>
+        <div class="card-grid">
+            {% for athlete in athletes %}
+                <article class="card">
+                    <div class="card-top">
+                        <div class="avatar">{{ athlete.first_name|first }}{{ athlete.last_name|first }}</div>
+                        <span class="tag">{{ athlete.sport }}</span>
+                    </div>
+                    <h3 style="margin-top:16px">{{ athlete.first_name }} {{ athlete.last_name }}</h3>
+                    <p class="muted">{{ athlete.position }} · {{ athlete.location }}{% if athlete.age %} · Age {{ athlete.age }}{% endif %}</p>
+                    {% if athlete.bio %}<p>{{ athlete.bio|truncatewords:24 }}</p>{% endif %}
+                    <div class="card-actions">
+                        <a class="button button-secondary button-small" href="{% url 'athlete_profile' athlete.pk %}">View profile</a>
+                        {% if athlete.pk in shortlisted_athlete_ids %}
+                            <span class="tag">Shortlisted</span>
+                        {% else %}
+                            <form method="post" action="{% url 'add_to_shortlist' athlete.pk %}">
+                                {% csrf_token %}<button type="submit">+ Shortlist</button>
+                            </form>
+                        {% endif %}
+                        <a class="button button-secondary button-small" href="{% url 'send_message' athlete.user.pk %}">Message</a>
+                    </div>
+                </article>
+            {% empty %}
+                <div class="empty-state">No athlete profiles match those filters. Try broadening your search.</div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="section-heading"><div><p class="eyebrow">Get started</p><h2>Search to see athletes</h2></div></div>
+        <div class="empty-state">Choose one or more filters above, or search with all fields blank to browse every athlete.</div>
+    {% endif %}
+{% endblock %}

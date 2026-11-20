@@ -1,0 +1,30 @@
+To check for accounts available
+
+SELECT id, username, email, role, is_active, created_at
+FROM sscs_api.users
+ORDER BY created_at DESC;
+
+
+To run backend and frontend at once
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\start.ps1"
+
+run frontend
+cd .\sscs_frontend
+npm.cmd run dev
+
+run backend
+cd "C:\Users\kgwmr\Desktop\ITPD - PROJECT\sscs_node"
+npm.cmd run dev
+
+search engine
+<script async src="https://cse.google.com/cse.js?cx=e77a65bc798674a24">
+</script>
+<div class="gcse-search"></div>
+https://cse.google.com/cse.js?cx=e77a65bc798674a24
+
+Google API
+
+Google API credential removed from this file. Revoke or rotate any previously exposed key with Google, and store future credentials only in private environment configuration.
+
+JWT secret key
+7e13e4c2d09d5897d0bb3098d2d7171846186e693f01040b26698ee3efcf452f5849f5cc1ad4dae28e074f662d5b85ab

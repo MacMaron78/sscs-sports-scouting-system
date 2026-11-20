@@ -1,0 +1,27 @@
+{% extends "core/base.html" %}
+{% block title %}{{ agency.agency_name }} · SSCS{% endblock %}
+{% block content %}
+    <div class="profile-layout">
+        <section class="panel profile-main">
+            <div class="profile-title">
+                <div class="avatar">{{ agency.agency_name|first }}</div>
+                <div><p class="eyebrow">Agency profile</p><h1>{{ agency.agency_name }}</h1></div>
+            </div>
+            <dl class="detail-list">
+                <dt>Country</dt><dd>{{ agency.country }}</dd>
+                <dt>Phone</dt><dd>{{ agency.contact_phone|default:"Not provided" }}</dd>
+                <dt>Contact</dt><dd>{{ agency.contact_details|linebreaksbr }}</dd>
+            </dl>
+        </section>
+        <aside class="panel profile-aside">
+            <h2>Connect</h2>
+            {% if agency.user != user %}
+                <p class="muted">Contact this agency to discuss opportunities.</p>
+                <a class="button" href="{% url 'send_message' agency.user.pk %}">Send Message</a>
+            {% else %}
+                <p class="muted">This is your agency profile.</p>
+            {% endif %}
+            <p style="margin-top:18px"><a href="{% url 'agency_directory' %}">← Browse agencies</a></p>
+        </aside>
+    </div>
+{% endblock %}

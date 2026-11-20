@@ -1,0 +1,30 @@
+{% extends "core/base.html" %}
+{% block title %}{{ athlete.first_name }} {{ athlete.last_name }} · SSCS{% endblock %}
+{% block content %}
+    <div class="profile-layout">
+        <section class="panel profile-main">
+            <div class="profile-title">
+                <div class="avatar">{{ athlete.first_name|first }}{{ athlete.last_name|first }}</div>
+                <div><p class="eyebrow">Athlete profile</p><h1>{{ athlete.first_name }} {{ athlete.last_name }}</h1></div>
+            </div>
+            <dl class="detail-list">
+                <dt>Sport</dt><dd>{{ athlete.sport }}</dd>
+                <dt>Position</dt><dd>{{ athlete.position }}</dd>
+                <dt>Age</dt><dd>{{ athlete.age|default:"Not provided" }}</dd>
+                <dt>Location</dt><dd>{{ athlete.location }}</dd>
+            </dl>
+            {% if athlete.bio %}<h2 style="margin-top:30px">About</h2><p>{{ athlete.bio|linebreaksbr }}</p>{% endif %}
+            {% if athlete.video_link %}<p style="margin-top:22px"><a class="button button-secondary" href="{{ athlete.video_link }}" target="_blank" rel="noopener">View highlight video ↗</a></p>{% endif %}
+        </section>
+        <aside class="panel profile-aside">
+            <h2>Connect</h2>
+            {% if athlete.user != user %}
+                <p class="muted">Interested in this athlete? Start a conversation.</p>
+                <a class="button" href="{% url 'send_message' athlete.user.pk %}">Send Message</a>
+            {% else %}
+                <p class="muted">This is your athlete profile.</p>
+            {% endif %}
+            <p style="margin-top:18px"><a href="{% url 'home' %}">← Back to home</a></p>
+        </aside>
+    </div>
+{% endblock %}

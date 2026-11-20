@@ -1,0 +1,15 @@
+{% extends "core/base.html" %}
+{% block title %}Message {{ recipient.username }} · SSCS{% endblock %}
+{% block content %}
+<section class="form-card">
+    <p class="eyebrow">Start a conversation</p>
+    <h1>Message {{ recipient.username }}</h1>
+    <p>Write a clear introduction or ask about the opportunity you're interested in.</p>
+    <form method="post">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        <p>{{ form.body.label_tag }}{{ form.body }}{{ form.body.errors }}</p>
+        <button type="submit">Send message</button>
+    </form>
+</section>
+{% endblock %}

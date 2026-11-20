@@ -1,0 +1,30 @@
+{% extends "core/base.html" %}
+{% block title %}Inbox · SSCS{% endblock %}
+{% block content %}
+    <p class="eyebrow">Your conversations</p>
+    <h1>Inbox</h1>
+    <p class="muted">Messages you've received and sent.</p>
+    <div class="section-heading"><div><h2>Received</h2></div></div>
+    <div class="message-list">
+        {% for message in received_messages %}
+            <article class="message-card">
+                <div class="message-meta"><span>From <strong>{{ message.sender.username }}</strong></span><time>{{ message.sent_at|date:"M j, Y · g:i A" }}</time></div>
+                <p class="message-body">{{ message.body|linebreaksbr }}</p>
+                <a href="{% url 'send_message' message.sender.pk %}">Reply →</a>
+            </article>
+        {% empty %}
+            <div class="empty-state">No received messages yet.</div>
+        {% endfor %}
+    </div>
+    <div class="section-heading"><div><h2>Sent</h2></div></div>
+    <div class="message-list">
+        {% for message in sent_messages %}
+            <article class="message-card">
+                <div class="message-meta"><span>To <strong>{{ message.recipient.username }}</strong></span><time>{{ message.sent_at|date:"M j, Y · g:i A" }}</time></div>
+                <p class="message-body">{{ message.body|linebreaksbr }}</p>
+            </article>
+        {% empty %}
+            <div class="empty-state">No sent messages yet. Visit an athlete or agency profile to say hello.</div>
+        {% endfor %}
+    </div>
+{% endblock %}

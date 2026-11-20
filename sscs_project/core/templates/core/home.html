@@ -1,0 +1,60 @@
+{% extends "core/base.html" %}
+{% block title %}SSCS — Find the next opportunity{% endblock %}
+{% block content %}
+    <section class="hero">
+        <div class="hero-content">
+            <p class="eyebrow">Sports Scouting &amp; Coordination System</p>
+            <h1>Make the next move in your sporting journey.</h1>
+            <p>Connect athletes with scouts and agencies. Discover talent, build your shortlist, and start a conversation.</p>
+            <div class="hero-actions">
+                {% if user.is_authenticated %}
+                    {% if user.role == "scout" %}
+                        <a class="button" href="{% url 'athlete_search' %}">Explore athletes</a>
+                    {% elif user.role == "athlete" and user.athlete_profile %}
+                        <a class="button" href="{% url 'athlete_profile' user.athlete_profile.pk %}">View my profile</a>
+                    {% endif %}
+                    <a class="button button-secondary" href="{% url 'inbox' %}">Open inbox</a>
+                {% else %}
+                    <a class="button" href="{% url 'register' %}">Create your account</a>
+                    <a class="button button-secondary" href="{% url 'login' %}">Log in</a>
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <div class="section-heading">
+        <div><p class="eyebrow">Talent discovery</p><h2>Recently added athletes</h2></div>
+        {% if user.is_authenticated and user.role == "scout" %}<a href="{% url 'athlete_search' %}">Search all athletes →</a>{% endif %}
+    </div>
+    <div class="card-grid">
+        {% for athlete in athletes %}
+            <article class="card">
+                <div class="card-top">
+                    <div class="avatar">{{ athlete.first_name|first }}{{ athlete.last_name|first }}</div>
+                    <span class="tag">{{ athlete.sport }}</span>
+                </div>
+                <h3 style="margin-top:16px">{{ athlete.first_name }} {{ athlete.last_name }}</h3>
+                <p class="muted">{{ athlete.position }} · {{ athlete.location }}</p>
+                <div class="card-actions"><a class="button button-secondary button-small" href="{% url 'athlete_profile' athlete.pk %}">View profile</a></div>
+            </article>
+        {% empty %}
+            <div class="empty-state">Athlete profiles will appear here after registration.</div>
+        {% endfor %}
+    </div>
+
+    <div class="section-heading">
+        <div><p class="eyebrow">The people behind the opportunities</p><h2>Agencies</h2></div>
+        <a href="{% url 'agency_directory' %}">Browse agencies →</a>
+    </div>
+    <div class="card-grid">
+        {% for agency in agencies %}
+            <article class="card">
+                <div class="card-top"><div class="avatar">{{ agency.agency_name|first }}</div><span class="tag">{{ agency.country }}</span></div>
+                <h3 style="margin-top:16px">{{ agency.agency_name }}</h3>
+                <div class="card-actions"><a class="button button-secondary button-small" href="{% url 'agency_profile' agency.pk %}">View agency</a></div>
+            </article>
+        {% empty %}
+            <div class="empty-state">Agency profiles will appear here after registration.</div>
+        {% endfor %}
+    </div>
+{% endblock %}

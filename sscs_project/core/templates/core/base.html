@@ -1,0 +1,40 @@
+{% load static %}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}SSCS — Sports Scouting{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'core/style.css' %}">
+</head>
+<body>
+    <header class="site-header">
+        <a class="brand" href="{% url 'home' %}"><span class="brand-mark">S</span> SSCS</a>
+        <nav class="main-nav" aria-label="Main navigation">
+            <a href="{% url 'home' %}">Home</a>
+            <a href="{% url 'agency_directory' %}">Agencies</a>
+            {% if user.is_authenticated %}
+                {% if user.role == "scout" %}
+                    <a href="{% url 'athlete_search' %}">Find athletes</a>
+                    <a href="{% url 'my_shortlist' %}">My shortlist</a>
+                {% endif %}
+                <a href="{% url 'inbox' %}">Inbox</a>
+                <form class="nav-logout" method="post" action="{% url 'logout' %}">
+                    {% csrf_token %}
+                    <button class="nav-link" type="submit">Log out</button>
+                </form>
+            {% else %}
+                <a href="{% url 'login' %}">Log in</a>
+                <a class="button button-small" href="{% url 'register' %}">Create account</a>
+            {% endif %}
+        </nav>
+    </header>
+    <main class="page-shell">
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="site-footer">
+        <span>SSCS · Sports Scouting &amp; Coordination System</span>
+        {% if user.is_authenticated %}<span>Signed in as {{ user.username }}</span>{% endif %}
+    </footer>
+</body>
+</html>

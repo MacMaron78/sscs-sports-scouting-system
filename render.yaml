@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: sscs-app
+    runtime: node
+    region: oregon
+    plan: free
+    buildCommand: npm ci --prefix sscs_node && npm ci --prefix sscs_frontend && npm run build --prefix sscs_frontend
+    startCommand: npm start --prefix sscs_node
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PGSCHEMA
+        value: sscs_api
+      - key: PGHOST
+        sync: false
+      - key: PGPORT
+        value: "5432"
+      - key: PGSSL
+        value: "false"
+      - key: PGDATABASE
+        sync: false
+      - key: PGUSER
+        sync: false
+      - key: PGPASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true

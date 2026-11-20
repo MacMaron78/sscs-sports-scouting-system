@@ -1,0 +1,50 @@
+{% extends "core/base.html" %}
+{% block title %}Create account · SSCS{% endblock %}
+{% block content %}
+<section class="form-card">
+    <p class="eyebrow">Join SSCS</p>
+    <h1>Create your account</h1>
+    <p>Choose your account type, then add the details scouts or athletes need to get started.</p>
+    <form method="post">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        <fieldset>
+            <legend>Account details</legend>
+            {% for field in form %}
+                {% if field.name == "username" or field.name == "email" or field.name == "password1" or field.name == "password2" or field.name == "role" %}
+                    <p>{{ field.label_tag }} {{ field }} {{ field.errors }}{% if field.help_text %}<small>{{ field.help_text }}</small>{% endif %}</p>
+                {% endif %}
+            {% endfor %}
+        </fieldset>
+        <fieldset data-role-fields="athlete">
+            <legend>Athlete profile</legend>
+            {% for field in form %}
+                {% if field.name == "athlete_first_name" or field.name == "athlete_last_name" or field.name == "sport" or field.name == "position" or field.name == "age" or field.name == "location" or field.name == "bio" or field.name == "video_link" %}
+                    <p>{{ field.label_tag }} {{ field }} {{ field.errors }}</p>
+                {% endif %}
+            {% endfor %}
+        </fieldset>
+        <fieldset data-role-fields="scout">
+            <legend>Scout / agency profile</legend>
+            {% for field in form %}
+                {% if field.name == "agency_name" or field.name == "country" or field.name == "contact_phone" or field.name == "contact_details" %}
+                    <p>{{ field.label_tag }} {{ field }} {{ field.errors }}</p>
+                {% endif %}
+            {% endfor %}
+        </fieldset>
+        <button type="submit">Create account</button>
+    </form>
+    <p style="margin-top:20px">Already registered? <a href="{% url 'login' %}">Log in</a></p>
+</section>
+<script>
+    const roleSelect = document.getElementById("id_role");
+    const roleFieldsets = document.querySelectorAll("[data-role-fields]");
+    function updateRoleFields() {
+        roleFieldsets.forEach((fieldset) => {
+            fieldset.hidden = fieldset.dataset.roleFields !== (roleSelect.value === "athlete" ? "athlete" : "scout");
+        });
+    }
+    roleSelect.addEventListener("change", updateRoleFields);
+    updateRoleFields();
+</script>
+{% endblock %}

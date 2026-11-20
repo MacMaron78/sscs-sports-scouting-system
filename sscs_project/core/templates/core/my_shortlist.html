@@ -1,0 +1,25 @@
+{% extends "core/base.html" %}
+{% block title %}My shortlist · SSCS{% endblock %}
+{% block content %}
+    <p class="eyebrow">Your saved talent</p>
+    <h1>My shortlist</h1>
+    <p class="muted">Athletes your agency is keeping an eye on.</p>
+    <div class="card-grid" style="margin-top:26px">
+        {% for entry in shortlist %}
+            <article class="card">
+                <div class="card-top">
+                    <div class="avatar">{{ entry.athlete.first_name|first }}{{ entry.athlete.last_name|first }}</div>
+                    <span class="tag">{{ entry.athlete.sport }}</span>
+                </div>
+                <h3 style="margin-top:16px">{{ entry.athlete.first_name }} {{ entry.athlete.last_name }}</h3>
+                <p class="muted">{{ entry.athlete.position }} · {{ entry.athlete.location }}{% if entry.athlete.age %} · Age {{ entry.athlete.age }}{% endif %}</p>
+                <div class="card-actions">
+                    <a class="button button-secondary button-small" href="{% url 'athlete_profile' entry.athlete.pk %}">View profile</a>
+                    <a class="button button-small" href="{% url 'send_message' entry.athlete.user.pk %}">Message</a>
+                </div>
+            </article>
+        {% empty %}
+            <div class="empty-state">Your shortlist is empty. <a href="{% url 'athlete_search' %}">Search athletes</a> and save profiles you like.</div>
+        {% endfor %}
+    </div>
+{% endblock %}
