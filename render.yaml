@@ -19,7 +19,7 @@ services:
       - key: PGPORT
         value: "5432"
       - key: PGSSL
-        value: "false"
+        value: "true"
       - key: PGDATABASE
         sync: false
       - key: PGUSER

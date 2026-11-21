@@ -132,6 +132,26 @@ CREATE INDEX IF NOT EXISTS sscs_api_messages_inbox_idx
 CREATE INDEX IF NOT EXISTS sscs_api_messages_sent_idx
     ON sscs_api.messages (sender_id, sent_at DESC);
 
+CREATE TABLE IF NOT EXISTS sscs_api.support_conversations (
+    user_id BIGINT PRIMARY KEY REFERENCES sscs_api.users(id) ON DELETE CASCADE,
+    status VARCHAR(16) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ,
+    resolved_by BIGINT REFERENCES sscs_api.users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS sscs_api_support_conversations_queue_idx
+    ON sscs_api.support_conversations (status, updated_at DESC);
+
+ALTER TABLE sscs_api.messages
+    ADD COLUMN IF NOT EXISTS support_user_id BIGINT
+        REFERENCES sscs_api.support_conversations(user_id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS sscs_api_messages_support_inbox_idx
+    ON sscs_api.messages (support_user_id, sent_at, id)
+    WHERE support_user_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS sscs_api.user_blocks (
     blocker_id BIGINT NOT NULL REFERENCES sscs_api.users(id) ON DELETE CASCADE,
     blocked_id BIGINT NOT NULL REFERENCES sscs_api.users(id) ON DELETE CASCADE,

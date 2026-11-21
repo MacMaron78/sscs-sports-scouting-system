@@ -44,6 +44,7 @@ export function Layout() {
     const pointerRef = useRef(null);
     const seenUnreadIds = useRef(new Set());
     const [unreadCount, setUnreadCount] = useState(0);
+    const [supportUnreadCount, setSupportUnreadCount] = useState(0);
     const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
     const [messageAlert, setMessageAlert] = useState(null);
     const [signingOut, setSigningOut] = useState(false);
@@ -112,6 +113,7 @@ export function Layout() {
         if (!user) {
             seenUnreadIds.current = new Set();
             setUnreadCount(0);
+            setSupportUnreadCount(0);
             setMessageAlert(null);
             return undefined;
         }
@@ -124,6 +126,7 @@ export function Layout() {
                 if (!active) return;
                 const recentMessages = result.recentMessages || [];
                 setUnreadCount(result.unreadCount);
+                setSupportUnreadCount(result.supportUnreadCount || 0);
 
                 if (!initialized) {
                     seenUnreadIds.current = new Set(recentMessages.map((message) => String(message.id)));
@@ -235,7 +238,7 @@ export function Layout() {
     }, []);
 
     return (
-        <div className={`app-shell${location.pathname === "/" ? " home-shell" : ""}${location.pathname.startsWith("/login") ? " login-shell" : ""}`}>
+        <div className={`app-shell${location.pathname === "/" ? " home-shell" : ""}${location.pathname.startsWith("/login") ? " login-shell" : ""}${location.pathname.startsWith("/admin") ? " admin-shell" : ""}`}>
             <span className="ball-pointer" ref={pointerRef} aria-hidden="true" />
             <aside className="app-sidebar">
                 <Link className="brand" to="/">
@@ -250,6 +253,7 @@ export function Layout() {
                         <NavLink to="/profile"><span className="sidebar-nav-icon"><SidebarIcon name="profile" /></span>My profile</NavLink>
                         <NavLink to="/agencies"><span className="sidebar-nav-icon"><SidebarIcon name="agencies" /></span>Agencies</NavLink>
                         <NavLink to="/inbox"><span className="sidebar-nav-icon"><SidebarIcon name="inbox" /></span>Inbox{unreadCount > 0 && <span className="sidebar-unread-badge" aria-label={`${unreadCount} unread messages`}>{unreadCount > 99 ? "99+" : unreadCount}</span>}</NavLink>
+                        <NavLink to="/support"><span className="sidebar-nav-icon"><SidebarIcon name="inbox" /></span>Contact Admin{supportUnreadCount > 0 && <span className="sidebar-unread-badge" aria-label={`${supportUnreadCount} unread support messages`}>{supportUnreadCount > 99 ? "99+" : supportUnreadCount}</span>}</NavLink>
                     </>}
                     {user?.role === "scout" && <>
                         <NavLink to="/scout-dashboard"><span className="sidebar-nav-icon"><SidebarIcon name="dashboard" /></span>Dashboard</NavLink>
@@ -257,9 +261,23 @@ export function Layout() {
                         <NavLink to="/shortlist"><span className="sidebar-nav-icon"><SidebarIcon name="shortlist" /></span>Shortlist</NavLink>
                         <NavLink to="/agencies"><span className="sidebar-nav-icon"><SidebarIcon name="agencies" /></span>Agencies</NavLink>
                         <NavLink to="/inbox"><span className="sidebar-nav-icon"><SidebarIcon name="inbox" /></span>Inbox{unreadCount > 0 && <span className="sidebar-unread-badge" aria-label={`${unreadCount} unread messages`}>{unreadCount > 99 ? "99+" : unreadCount}</span>}</NavLink>
+                        <NavLink to="/support"><span className="sidebar-nav-icon"><SidebarIcon name="inbox" /></span>Contact Admin{supportUnreadCount > 0 && <span className="sidebar-unread-badge" aria-label={`${supportUnreadCount} unread support messages`}>{supportUnreadCount > 99 ? "99+" : supportUnreadCount}</span>}</NavLink>
                         <NavLink to="/profile"><span className="sidebar-nav-icon"><SidebarIcon name="profile" /></span>Agency profile</NavLink>
                     </>}
-                    {user?.role === "admin" && <NavLink to="/admin"><span className="sidebar-nav-icon"><SidebarIcon name="reports" /></span>Admin console{pendingApprovalCount > 0 && <span className="sidebar-approval-badge" aria-label={`${pendingApprovalCount} administrator requests need review`}>{pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}</span>}</NavLink>}
+                    {user?.role === "admin" && <>
+                        <NavLink to="/admin" aria-label="Admin console" title="Admin console">
+                            <span className="sidebar-nav-icon"><SidebarIcon name="reports" /></span>
+                            <span className="admin-nav-label-long">Admin console</span>
+                            <span className="admin-nav-label-short" aria-hidden="true">Admin</span>
+                            {pendingApprovalCount > 0 && <span className="sidebar-approval-badge" aria-label={`${pendingApprovalCount} administrator requests need review`}>{pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}</span>}
+                        </NavLink>
+                        <NavLink to="/admin#support-inbox" aria-label="Support Inbox" title="Support Inbox">
+                            <span className="sidebar-nav-icon"><SidebarIcon name="inbox" /></span>
+                            <span className="admin-nav-label-long">Support Inbox</span>
+                            <span className="admin-nav-label-short" aria-hidden="true">Support</span>
+                            {supportUnreadCount > 0 && <span className="sidebar-approval-badge" aria-label={`${supportUnreadCount} unread support conversations`}>{supportUnreadCount > 99 ? "99+" : supportUnreadCount}</span>}
+                        </NavLink>
+                    </>}
                 </nav>
                 <div className="sidebar-footer">
                     <span className="sidebar-footer-mark">S</span>

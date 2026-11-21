@@ -1,49 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { createDatabasePoolConfig } from "./database-config.js";
 
 const { Pool } = pg;
 
-
-const hasDatabaseUrl = Boolean(process.env.DATABASE_URL);
-
-if (!hasDatabaseUrl) {
-  const requiredEnvironment = [
-    "PGHOST",
-    "PGPORT",
-    "PGDATABASE",
-    "PGUSER",
-    "PGPASSWORD"
-  ];
-
-  for (const name of requiredEnvironment) {
-    if (!process.env[name]) {
-      throw new Error(
-        `Missing required environment variable ${name}.`
-      );
-    }
-  }
-}
-
 export const pool = new Pool({
-  ...(hasDatabaseUrl
-    ? {
-        connectionString: process.env.DATABASE_URL,
-        ssl: { rejectUnauthorized: false }
-      }
-    : {
-        host: process.env.PGHOST,
-        port: Number(process.env.PGPORT),
-        database: process.env.PGDATABASE,
-        user: process.env.PGUSER,
-        password: process.env.PGPASSWORD,
-        ssl: process.env.PGSSL === "true"
-          ? { rejectUnauthorized: false }
-          : undefined
-      }),
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000
+    ...createDatabasePoolConfig(process.env),
 });
 
 

@@ -40,10 +40,13 @@ let registeredScout = null;
 let lastAthleteSearchSql = "";
 const userBlocks = new Set();
 const storedMessages = [];
+const supportMessages = [];
+const supportConversations = new Map();
 const storedReports = [];
 const storedPasswordResetRequests = [];
 const storedPasswordResetAudit = [];
 let nextMessageId = 1;
+let nextSupportMessageId = 1;
 let nextReportId = 1;
 let nextPasswordResetRequestId = 1;
 let testUserTokenVersion = 0;
@@ -52,6 +55,144 @@ const fakePool = {
     async query(sql, values = []) {
         if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) {
             return { rows: [], rowCount: 0 };
+        }
+        if (sql.includes("SELECT id, username FROM") && sql.includes("role = 'admin'")) {
+            return { rows: [{ id: 2, username: "test-admin" }], rowCount: 1 };
+        }
+        if (sql.includes("INSERT INTO") && sql.includes(".support_conversations")) {
+            const userId = Number(values[0]);
+            const existing = supportConversations.get(userId);
+            supportConversations.set(userId, {
+                user_id: userId,
+                status: "open",
+                created_at: existing?.created_at || "2026-11-14T00:00:00.000Z",
+                updated_at: "2026-11-14T00:00:00.000Z",
+                resolved_at: null,
+                resolved_by: null,
+            });
+            return { rows: [], rowCount: 1 };
+        }
+        if (sql.includes("INSERT INTO") && sql.includes(".messages")
+            && sql.includes("VALUES ($1, $2, $3, $4)")) {
+            const [senderId, recipientId, body, supportUserId] = values;
+            const message = {
+                id: nextSupportMessageId++,
+                sender_id: Number(senderId),
+                recipient_id: Number(recipientId),
+                body,
+                support_user_id: Number(supportUserId),
+                sent_at: `2026-11-14T00:0${nextSupportMessageId}:00.000Z`,
+                is_read: false,
+            };
+            supportMessages.push(message);
+            return { rows: [message], rowCount: 1 };
+        }
+        if (sql.includes("SELECT status FROM") && sql.includes(".support_conversations")) {
+            const conversation = supportConversations.get(Number(values[0]));
+            return conversation ? { rows: [{ status: conversation.status }], rowCount: 1 } : { rows: [], rowCount: 0 };
+        }
+        if (sql.includes("SELECT c.user_id, u.username, u.role") && sql.includes(".support_conversations")) {
+            const userId = Number(values[0]);
+            const conversation = supportConversations.get(userId);
+            const user = userId === 3
+                ? { username: "test-scout", role: "scout" }
+                : userId === 4
+                    ? { username: "scout.regression", role: "scout" }
+                    : { username: "test-athlete", role: "athlete" };
+            return conversation
+                ? { rows: [{ user_id: userId, ...user }], rowCount: 1 }
+                : { rows: [], rowCount: 0 };
+        }
+        if (sql.includes("UPDATE") && sql.includes(".support_conversations")
+            && sql.includes("SET status = $1")) {
+            const [status, resolverId, userId] = values;
+            const conversation = supportConversations.get(Number(userId));
+            if (!conversation) return { rows: [], rowCount: 0 };
+            Object.assign(conversation, {
+                status,
+                updated_at: "2026-11-14T00:10:00.000Z",
+                resolved_at: status === "resolved" ? "2026-11-14T00:10:00.000Z" : null,
+                resolved_by: status === "resolved" ? resolverId : null,
+            });
+            return { rows: [{ user_id: Number(userId), status, updated_at: conversation.updated_at, resolved_at: conversation.resolved_at }], rowCount: 1 };
+        }
+        if (sql.includes("UPDATE") && sql.includes(".support_conversations SET updated_at")) {
+            const conversation = supportConversations.get(Number(values[0]));
+            if (conversation) conversation.updated_at = "2026-11-14T00:10:00.000Z";
+            return { rows: [], rowCount: conversation ? 1 : 0 };
+        }
+        if (sql.includes("UPDATE") && sql.includes(".messages SET is_read = TRUE")
+            && sql.includes("sender_id = $1")) {
+            const userId = Number(values[0]);
+            let updated = 0;
+            for (const message of supportMessages) {
+                if (message.support_user_id === userId
+                    && message.sender_id === userId && !message.is_read) {
+                    message.is_read = true;
+                    updated += 1;
+                }
+            }
+            return { rows: [], rowCount: updated };
+        }
+        if (sql.includes("UPDATE") && sql.includes(".messages SET is_read = TRUE")
+            && sql.includes("recipient_id = $1")) {
+            const userId = Number(values[0]);
+            let updated = 0;
+            for (const message of supportMessages) {
+                if (message.support_user_id === userId
+                    && message.recipient_id === userId && !message.is_read) {
+                    message.is_read = true;
+                    updated += 1;
+                }
+            }
+            return { rows: [], rowCount: updated };
+        }
+        if (sql.includes("SELECT c.user_id, c.status") && sql.includes(".support_conversations c")
+            && sql.includes("AS unread_count")) {
+            const conversations = [...supportConversations.values()].map((conversation) => {
+                const userId = conversation.user_id;
+                const role = userId === 1 ? "athlete" : "scout";
+                const userMessages = supportMessages.filter((message) => message.support_user_id === userId);
+                const latest = userMessages.at(-1);
+                return {
+                    ...conversation,
+                    username: userId === 1 ? "test-athlete" : userId === 3 ? "test-scout" : "scout.regression",
+                    role,
+                    display_name: role === "athlete" ? "Test Athlete" : "Test Scout",
+                    latest_message: latest?.body || null,
+                    latest_message_at: latest?.sent_at || null,
+                    unread_count: userMessages.filter((message) => message.sender_id === userId && !message.is_read).length,
+                };
+            });
+            conversations.sort((first, second) => second.unread_count - first.unread_count);
+            return { rows: conversations, rowCount: conversations.length };
+        }
+        if (sql.includes("JOIN") && sql.includes(".support_conversations c")
+            && sql.includes("WHERE c.user_id = $1")) {
+            const userId = Number(values[0]);
+            const rows = supportMessages
+                .filter((message) => message.support_user_id === userId)
+                .map((message) => ({
+                    ...message,
+                    sender_username: message.sender_id === 2 ? "test-admin" : message.sender_id === 1 ? "test-athlete" : message.sender_id === 3 ? "test-scout" : "scout.regression",
+                    sender_role: message.sender_id === 2 ? "admin" : message.sender_id === 1 ? "athlete" : "scout",
+                    recipient_username: message.recipient_id === 2 ? "test-admin" : message.recipient_id === 1 ? "test-athlete" : message.recipient_id === 3 ? "test-scout" : "scout.regression",
+                    recipient_role: message.recipient_id === 2 ? "admin" : message.recipient_id === 1 ? "athlete" : "scout",
+                }));
+            return { rows, rowCount: rows.length };
+        }
+        if (sql.includes("SELECT m.id, m.sender_id, m.recipient_id") && sql.includes(".messages m")) {
+            const userId = Number(values[0]);
+            const rows = supportMessages
+                .filter((message) => message.support_user_id === userId)
+                .map((message) => ({
+                    ...message,
+                    sender_username: message.sender_id === 2 ? "test-admin" : message.sender_id === 1 ? "test-athlete" : message.sender_id === 3 ? "test-scout" : "scout.regression",
+                    sender_role: message.sender_id === 2 ? "admin" : message.sender_id === 1 ? "athlete" : "scout",
+                    recipient_username: message.recipient_id === 2 ? "test-admin" : message.recipient_id === 1 ? "test-athlete" : message.recipient_id === 3 ? "test-scout" : "scout.regression",
+                    recipient_role: message.recipient_id === 2 ? "admin" : message.recipient_id === 1 ? "athlete" : "scout",
+                }));
+            return { rows, rowCount: rows.length };
         }
         if (sql.includes("INSERT INTO") && sql.includes("messages")) {
             const [senderId, recipientId, body] = values;
@@ -539,9 +680,18 @@ const fakePool = {
             return { rows: [{ athlete_count: 7, agency_count: 3 }], rowCount: 1 };
         }
         if (sql.includes("AS unread_count")) {
+            const userId = Number(values[0]);
+            const isAdmin = values[1] === "admin";
             return {
                 rows: [{
                     unread_count: 2,
+                    support_unread_count: supportMessages.filter((message) => (
+                        !message.is_read
+                        && message.support_user_id !== null
+                        && (isAdmin
+                            ? message.recipient_id === userId
+                            : message.recipient_id === userId && message.support_user_id === userId)
+                    )).length,
                     recent_messages: [
                         { id: 21, body: "Are you available for a trial?", sent_at: "2026-11-03T10:00:00.000Z", sender_username: "scout-one" },
                         { id: 20, body: "I saw your profile.", sent_at: "2026-11-03T09:00:00.000Z", sender_username: "scout-two" },
@@ -941,8 +1091,172 @@ test("unread-message endpoint returns the signed-in user's count and recent mess
     assert.equal(response.status, 200);
     const payload = await response.json();
     assert.equal(payload.unreadCount, 2);
+    assert.equal(payload.supportUnreadCount, 0);
     assert.equal(payload.recentMessages.length, 2);
     assert.equal(payload.recentMessages[0].sender_username, "scout-one");
+});
+
+test("support inbox isolates athlete and scout conversations and supports admin replies, read state, and resolution", async () => {
+    supportMessages.splice(0);
+    supportConversations.clear();
+    nextSupportMessageId = 1;
+    const tokenFor = (id, role) => jwt.sign(
+        { sub: String(id), role },
+        process.env.JWT_SECRET,
+        { expiresIn: "1h", issuer: "sscs-api", audience: "sscs-web" },
+    );
+    const headersFor = (id, role) => ({
+        Cookie: `sscs_session=${tokenFor(id, role)}`,
+        "Content-Type": "application/json",
+    });
+    const athleteHeaders = headersFor(1, "athlete");
+    const scoutHeaders = headersFor(3, "scout");
+    const adminHeaders = headersFor(2, "admin");
+
+    const athleteMessage = await fetch(`${baseUrl}/api/support/messages`, {
+        method: "POST",
+        headers: athleteHeaders,
+        body: JSON.stringify({
+            body: "I need help with my profile.",
+            support_user_id: 3,
+        }),
+    });
+    assert.equal(athleteMessage.status, 201);
+    const athleteMessagePayload = await athleteMessage.json();
+    assert.equal(athleteMessagePayload.message.sender_role, "athlete");
+    assert.equal(athleteMessagePayload.message.support_user_id, 1);
+
+    const scoutMessage = await fetch(`${baseUrl}/api/support/messages`, {
+        method: "POST",
+        headers: scoutHeaders,
+        body: JSON.stringify({ body: "I need help with scouting access." }),
+    });
+    assert.equal(scoutMessage.status, 201);
+    assert.equal((await scoutMessage.json()).message.sender_role, "scout");
+    assert.equal(supportConversations.get(1).status, "open");
+    assert.equal(supportConversations.get(3).status, "open");
+
+    supportMessages.push({
+        id: 999,
+        sender_id: 1,
+        recipient_id: 2,
+        body: "Unassociated legacy admin message",
+        sent_at: "2026-11-14T00:09:00.000Z",
+        is_read: false,
+        support_user_id: null,
+    });
+
+    const emptyMessage = await fetch(`${baseUrl}/api/support/messages`, {
+        method: "POST",
+        headers: athleteHeaders,
+        body: JSON.stringify({ body: "   " }),
+    });
+    assert.equal(emptyMessage.status, 400);
+    const oversizedMessage = await fetch(`${baseUrl}/api/support/messages`, {
+        method: "POST",
+        headers: scoutHeaders,
+        body: JSON.stringify({ body: "x".repeat(5001) }),
+    });
+    assert.equal(oversizedMessage.status, 400);
+    const adminUserInbox = await fetch(`${baseUrl}/api/support/messages`, { headers: adminHeaders });
+    assert.equal(adminUserInbox.status, 403);
+
+    const adminUnread = await fetch(`${baseUrl}/api/messages/unread`, { headers: adminHeaders });
+    assert.equal((await adminUnread.json()).supportUnreadCount, 2);
+
+    const forbiddenQueue = await fetch(`${baseUrl}/api/admin/support/conversations`, { headers: scoutHeaders });
+    assert.equal(forbiddenQueue.status, 403);
+    const forbiddenThread = await fetch(`${baseUrl}/api/admin/support/conversations/1/messages`, { headers: athleteHeaders });
+    assert.equal(forbiddenThread.status, 403);
+    const forbiddenReply = await fetch(`${baseUrl}/api/admin/support/conversations/1/messages`, {
+        method: "POST",
+        headers: scoutHeaders,
+        body: JSON.stringify({ body: "Not an administrator." }),
+    });
+    assert.equal(forbiddenReply.status, 403);
+    const forbiddenResolve = await fetch(`${baseUrl}/api/admin/support/conversations/1`, {
+        method: "PATCH",
+        headers: scoutHeaders,
+        body: JSON.stringify({ status: "resolved" }),
+    });
+    assert.equal(forbiddenResolve.status, 403);
+
+    const queueResponse = await fetch(`${baseUrl}/api/admin/support/conversations`, { headers: adminHeaders });
+    assert.equal(queueResponse.status, 200);
+    const queue = await queueResponse.json();
+    assert.equal(queue.conversations.length, 2);
+    assert.deepEqual(new Set(queue.conversations.map((conversation) => conversation.user_id)), new Set([1, 3]));
+    const athleteConversation = queue.conversations.find((conversation) => conversation.user_id === 1);
+    assert.equal(athleteConversation.unread_count, 1);
+    assert.equal(athleteConversation.latest_message, "I need help with my profile.");
+
+    const adminThread = await fetch(`${baseUrl}/api/admin/support/conversations/1/messages`, { headers: adminHeaders });
+    assert.equal(adminThread.status, 200);
+    assert.equal((await adminThread.json()).messages[0].is_read, true);
+
+    const reply = await fetch(`${baseUrl}/api/admin/support/conversations/1/messages`, {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({
+            body: "We can help with that.",
+            support_user_id: 3,
+        }),
+    });
+    assert.equal(reply.status, 201);
+    const replyPayload = await reply.json();
+    assert.equal(replyPayload.message.sender_role, "admin");
+    assert.equal(replyPayload.message.support_user_id, 1);
+
+    const athleteUnread = await fetch(`${baseUrl}/api/messages/unread`, { headers: athleteHeaders });
+    assert.equal((await athleteUnread.json()).supportUnreadCount, 1);
+
+    const athleteHistoryResponse = await fetch(`${baseUrl}/api/support/messages?userId=3`, { headers: athleteHeaders });
+    assert.equal(athleteHistoryResponse.status, 200);
+    const athleteHistory = await athleteHistoryResponse.json();
+    assert.equal(athleteHistory.messages.length, 2);
+    assert.deepEqual(athleteHistory.messages.map((message) => message.body), [
+        "I need help with my profile.",
+        "We can help with that.",
+    ]);
+    assert.equal(athleteHistory.messages.some((message) => message.body.includes("legacy admin")), false);
+    assert.equal(athleteHistory.messages[1].is_read, true);
+    assert.equal(athleteHistory.messages.some((message) => message.body.includes("scouting access")), false);
+
+    const readUnread = await fetch(`${baseUrl}/api/messages/unread`, { headers: athleteHeaders });
+    assert.equal((await readUnread.json()).supportUnreadCount, 0);
+
+    const resolved = await fetch(`${baseUrl}/api/admin/support/conversations/1`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({ status: "resolved" }),
+    });
+    assert.equal(resolved.status, 200);
+    assert.equal((await resolved.json()).conversation.status, "resolved");
+    const statusResponse = await fetch(`${baseUrl}/api/support/messages`, { headers: athleteHeaders });
+    const resolvedHistory = await statusResponse.json();
+    assert.equal(statusResponse.status, 200, JSON.stringify(resolvedHistory));
+    assert.equal(resolvedHistory.status, "resolved", JSON.stringify(resolvedHistory));
+
+    const reopened = await fetch(`${baseUrl}/api/support/messages`, {
+        method: "POST",
+        headers: athleteHeaders,
+        body: JSON.stringify({ body: "Following up on this request." }),
+    });
+    assert.equal(reopened.status, 201);
+    assert.equal(supportConversations.get(1).status, "open");
+    assert.equal(supportConversations.get(3).status, "open");
+
+    const isolatedAdminHistory = await fetch(`${baseUrl}/api/admin/support/conversations/1/messages`, { headers: adminHeaders });
+    assert.equal(isolatedAdminHistory.status, 200);
+    const adminHistory = await isolatedAdminHistory.json();
+    assert.equal(adminHistory.messages.length, 3);
+    assert.equal(adminHistory.messages.some((message) => message.body.includes("scouting access")), false);
+    assert.equal(adminHistory.messages.some((message) => message.body.includes("legacy admin")), false);
+
+    const missingConversation = await fetch(`${baseUrl}/api/admin/support/conversations/999/messages`, { headers: adminHeaders });
+    assert.equal(missingConversation.status, 404);
+    supportMessages.splice(0);
+    supportConversations.clear();
 });
 
 test("unread-message endpoint requires authentication", async () => {

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { api, formatDate } from "./api";
 import { useAuth } from "./auth";
 import { AthleteCard, AuthProgressBar, EmptyState, ErrorNotice, Loading, PageIntro, PhotoAvatar, SuccessNotice, VerificationBadge, VerifiedAccountTick } from "./components";
+import { AdminSupportInbox } from "./support";
 
 function PageLoading() {
     return <Loading label="Loading SSCS data…" />;
@@ -2168,13 +2169,12 @@ export function AdminDashboardPage() {
     return <div className="admin-dashboard-page">
         <section className="admin-command-header">
             <div className="admin-command-copy">
-                <p className="admin-kicker"><span /> GLOBAL NETWORK / CONTROL</p>
-                <h1>See the whole<br /><span>field of play.</span></h1>
-                <p>Oversee the worldwide SSCS community, protect account access, and keep every connection moving.</p>
+                <p className="admin-kicker"><span /> SSCS ADMINISTRATION</p>
+                <h1>Administrator dashboard</h1>
+                <p>Manage user accounts, review verification requests, and monitor platform activity.</p>
             </div>
-            <DashboardNetworkVisual label="NETWORK / MONITORING" code="ADMIN · CONTROL" icon="⌘" />
             <div className="admin-command-panel">
-                <span className={`admin-system-status${error ? " is-warning" : ""}`}><i />{error ? "ATTENTION REQUIRED" : "SYSTEM MONITORING"}</span>
+                <span className={`admin-system-status${error ? " is-warning" : ""}`}><i />{error ? "ATTENTION REQUIRED" : "ADMINISTRATOR ACCESS"}</span>
                 <span className="admin-panel-divider" />
                 <span className="admin-session-label">SIGNED IN AS</span>
                 <strong>{user?.username || "SSCS ADMINISTRATOR"}</strong>
@@ -2235,6 +2235,7 @@ export function AdminDashboardPage() {
                 <MetricCard label="Messages" value={summary?.messages} icon="⌁" tone="rose" />
             </div>
         </section>
+        <AdminSupportInbox />
 
         <section className="admin-users admin-directory" id="approval-queue">
             <div className="admin-directory-heading">

@@ -17,6 +17,7 @@ import {
     ScoutDashboardPage,
     ShortlistPage,
 } from "./pages";
+import { SupportInboxPage } from "./support";
 
 export default function App() {
     return <Routes>
@@ -34,6 +35,9 @@ export default function App() {
                 <Route path="athletes/:id" element={<AthleteDetailPage />} />
                 <Route path="agencies" element={<AgencyDirectoryPage />} />
                 <Route path="agencies/:id" element={<AgencyDetailPage />} />
+                <Route element={<ProtectedRoute roles={["athlete", "scout"]} />}>
+                    <Route path="support" element={<SupportInboxPage />} />
+                </Route>
                 <Route element={<ProtectedRoute roles={["scout"]} />}>
                     <Route path="scout-dashboard" element={<ScoutDashboardPage />} />
                     <Route path="athletes" element={<AthleteSearchPage />} />

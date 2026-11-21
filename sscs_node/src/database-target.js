@@ -1,3 +1,5 @@
+import { parsePgSsl } from "./database-config.js";
+
 export class SetupError extends Error {}
 
 function parseDatabaseUrl(value) {
@@ -63,8 +65,16 @@ export function assertProductionDatabaseTarget(environment) {
     if (getSchema(environment) !== "sscs_api") {
         throw new SetupError("Production setup requires the sscs_api schema.");
     }
-    if (!environment.DATABASE_URL && environment.PGSSL !== "true") {
-        throw new SetupError("Set PGSSL=true when using individual production PostgreSQL settings.");
+    if (!environment.DATABASE_URL) {
+        let sslEnabled;
+        try {
+            sslEnabled = parsePgSsl(environment.PGSSL);
+        } catch {
+            throw new SetupError("Set PGSSL=true when using individual production PostgreSQL settings.");
+        }
+        if (!sslEnabled) {
+            throw new SetupError("Set PGSSL=true when using individual production PostgreSQL settings.");
+        }
     }
     return target;
 }

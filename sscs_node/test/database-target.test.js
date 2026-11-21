@@ -57,6 +57,13 @@ test("production target requires the expected schema and TLS for PG variables", 
         }),
         /Set PGSSL=true/,
     );
+
+    assert.equal(assertProductionDatabaseTarget({
+        PGHOST: "ep-example.neon.tech",
+        PGDATABASE: "neondb",
+        PGSCHEMA: "sscs_api",
+        PGSSL: " TRUE ",
+    }).host, "ep-example.neon.tech");
 });
 
 test("production target rejects URL query parameters that could redirect the connection", () => {

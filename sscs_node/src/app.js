@@ -885,7 +885,12 @@ export function createApp(databasePool) {
                  FROM ${db}.messages m
                  JOIN ${db}.users sender ON sender.id = m.sender_id
                  JOIN ${db}.users recipient ON recipient.id = m.recipient_id
-                 WHERE m.sender_id = $1 OR m.recipient_id = $1
+                 WHERE (m.sender_id = $1 OR m.recipient_id = $1)
+                   AND m.support_user_id IS NULL
+                   AND NOT (
+                       (m.sender_id = $1 AND recipient.role = 'admin')
+                       OR (m.recipient_id = $1 AND sender.role = 'admin')
+                   )
                  ORDER BY m.sent_at DESC LIMIT 200`,
                 [request.user.id],
             );
@@ -899,8 +904,23 @@ export function createApp(databasePool) {
         try {
             const result = await databasePool.query(
                 `SELECT
-                    (SELECT COUNT(*)::int FROM ${db}.messages
-                     WHERE recipient_id = $1 AND is_read = FALSE) AS unread_count,
+                    (SELECT COUNT(*)::int
+                     FROM ${db}.messages m
+                     JOIN ${db}.users sender ON sender.id = m.sender_id
+                     WHERE m.recipient_id = $1 AND m.is_read = FALSE
+                       AND m.support_user_id IS NULL
+                       AND ($2 = 'admin' OR sender.role <> 'admin')) AS unread_count,
+                    (SELECT COUNT(*)::int
+                     FROM ${db}.messages m
+                     WHERE m.is_read = FALSE
+                       AND m.support_user_id IS NOT NULL
+                       AND (
+                           ($2 = 'admin' AND m.recipient_id IN (
+                               SELECT id FROM ${db}.users WHERE role = 'admin'
+                           ))
+                           OR ($2 <> 'admin' AND m.recipient_id = $1 AND m.support_user_id = $1)
+                       )
+                    ) AS support_unread_count,
                     COALESCE((
                         SELECT json_agg(recent)
                         FROM (
@@ -908,14 +928,17 @@ export function createApp(databasePool) {
                             FROM ${db}.messages m
                             JOIN ${db}.users sender ON sender.id = m.sender_id
                             WHERE m.recipient_id = $1 AND m.is_read = FALSE
+                              AND m.support_user_id IS NULL
+                              AND ($2 = 'admin' OR sender.role <> 'admin')
                             ORDER BY m.sent_at DESC
                             LIMIT 20
                         ) recent
                     ), '[]'::json) AS recent_messages`,
-                [request.user.id],
+                [request.user.id, request.user.role],
             );
             return response.json({
                 unreadCount: result.rows[0].unread_count,
+                supportUnreadCount: result.rows[0].support_unread_count,
                 recentMessages: result.rows[0].recent_messages,
             });
         } catch (error) {
@@ -973,6 +996,227 @@ export function createApp(databasePool) {
             );
             if (!result.rows[0]) return apiError(response, 404, "Received message not found.");
             return response.json({ message: result.rows[0] });
+        } catch (error) {
+            return next(error);
+        }
+    });
+
+    app.get("/api/support/messages", authenticate, async (request, response, next) => {
+        if (!["athlete", "scout"].includes(request.user.role)) {
+            return apiError(response, 403, "Only athlete and Scout/Agency accounts can use the support inbox.");
+        }
+        try {
+            const conversation = await databasePool.query(
+                `SELECT status FROM ${db}.support_conversations WHERE user_id = $1`,
+                [request.user.id],
+            );
+            await databasePool.query(
+                `UPDATE ${db}.messages SET is_read = TRUE
+                 WHERE support_user_id = $1 AND recipient_id = $1 AND is_read = FALSE`,
+                [request.user.id],
+            );
+            const result = await databasePool.query(
+                `SELECT m.id, m.sender_id, m.recipient_id, m.body, m.sent_at, m.is_read,
+                        sender.username AS sender_username, sender.role AS sender_role,
+                        recipient.username AS recipient_username, recipient.role AS recipient_role
+                 FROM ${db}.messages m
+                 JOIN ${db}.users sender ON sender.id = m.sender_id
+                 JOIN ${db}.users recipient ON recipient.id = m.recipient_id
+                 WHERE m.support_user_id = $1
+                 ORDER BY m.sent_at ASC, m.id ASC
+                 LIMIT 500`,
+                [request.user.id],
+            );
+            return response.json({
+                status: conversation.rows[0]?.status || "open",
+                messages: result.rows,
+            });
+        } catch (error) {
+            return next(error);
+        }
+    });
+
+    app.post("/api/support/messages", authenticate, async (request, response, next) => {
+        if (!["athlete", "scout"].includes(request.user.role)) {
+            return apiError(response, 403, "Only athlete and Scout/Agency accounts can contact support.");
+        }
+        const body = String(request.body?.body ?? "").trim();
+        if (!body || body.length > 5000) return apiError(response, 400, "Message must be 1–5000 characters.");
+
+        let client;
+        let transactionStarted = false;
+        try {
+            client = await databasePool.connect();
+            await client.query("BEGIN");
+            transactionStarted = true;
+            const admins = await client.query(
+                `SELECT id, username FROM ${db}.users
+                 WHERE role = 'admin' AND is_active = TRUE
+                 ORDER BY id ASC LIMIT 1`,
+            );
+            const admin = admins.rows[0];
+            if (!admin) {
+                await client.query("ROLLBACK");
+                transactionStarted = false;
+                return apiError(response, 503, "Support is temporarily unavailable. Please try again later.");
+            }
+
+            await client.query(
+                `INSERT INTO ${db}.support_conversations (user_id, status)
+                 VALUES ($1, 'open')
+                 ON CONFLICT (user_id) DO UPDATE
+                 SET status = 'open', updated_at = NOW(), resolved_at = NULL, resolved_by = NULL`,
+                [request.user.id],
+            );
+            const created = await client.query(
+                `INSERT INTO ${db}.messages (sender_id, recipient_id, body, support_user_id)
+                 VALUES ($1, $2, $3, $4)
+                 RETURNING id, sender_id, recipient_id, body, sent_at, is_read, support_user_id`,
+                [request.user.id, admin.id, body, request.user.id],
+            );
+            await client.query("COMMIT");
+            transactionStarted = false;
+            return response.status(201).json({
+                message: {
+                    ...created.rows[0],
+                    sender_username: request.user.username,
+                    sender_role: request.user.role,
+                    recipient_username: admin.username,
+                    recipient_role: "admin",
+                },
+            });
+        } catch (error) {
+            if (transactionStarted) await client.query("ROLLBACK");
+            return next(error);
+        } finally {
+            client?.release();
+        }
+    });
+
+    app.get("/api/admin/support/conversations", authenticate, requireRole("admin"), async (request, response, next) => {
+        try {
+            const result = await databasePool.query(
+                `SELECT c.user_id, c.status, c.created_at, c.updated_at, c.resolved_at,
+                        u.username, u.role,
+                        COALESCE(ap.first_name || ' ' || ap.last_name, ag.agency_name, u.username) AS display_name,
+                        latest.body AS latest_message, latest.sent_at AS latest_message_at,
+                        COALESCE(unread.unread_count, 0)::int AS unread_count
+                 FROM ${db}.support_conversations c
+                 JOIN ${db}.users u ON u.id = c.user_id
+                 LEFT JOIN ${db}.athlete_profiles ap ON ap.user_id = u.id
+                 LEFT JOIN ${db}.agency_profiles ag ON ag.user_id = u.id
+                 LEFT JOIN LATERAL (
+                     SELECT m.body, m.sent_at
+                     FROM ${db}.messages m
+                     WHERE m.support_user_id = c.user_id
+                     ORDER BY m.sent_at DESC, m.id DESC
+                     LIMIT 1
+                 ) latest ON TRUE
+                 LEFT JOIN LATERAL (
+                     SELECT COUNT(*) AS unread_count
+                     FROM ${db}.messages m
+                     WHERE m.support_user_id = c.user_id
+                       AND m.sender_id = c.user_id AND m.is_read = FALSE
+                 ) unread ON TRUE
+                 WHERE u.role IN ('athlete', 'scout')
+                 ORDER BY unread.unread_count DESC, c.updated_at DESC`,
+            );
+            return response.json({ conversations: result.rows });
+        } catch (error) {
+            return next(error);
+        }
+    });
+
+    app.get("/api/admin/support/conversations/:userId/messages", authenticate, requireRole("admin"), async (request, response, next) => {
+        const userId = parseId(request.params.userId);
+        if (!userId) return apiError(response, 400, "Invalid support conversation identifier.");
+        try {
+            const conversation = await databasePool.query(
+                `SELECT status FROM ${db}.support_conversations
+                 WHERE user_id = $1 AND EXISTS (
+                     SELECT 1 FROM ${db}.users WHERE id = $1 AND role IN ('athlete', 'scout')
+                 )`,
+                [userId],
+            );
+            if (!conversation.rows[0]) return apiError(response, 404, "Support conversation not found.");
+            await databasePool.query(
+                `UPDATE ${db}.messages SET is_read = TRUE
+                 WHERE support_user_id = $1 AND is_read = FALSE AND sender_id = $1`,
+                [userId],
+            );
+            const result = await databasePool.query(
+                `SELECT m.id, m.sender_id, m.recipient_id, m.body, m.sent_at, m.is_read,
+                        sender.username AS sender_username, sender.role AS sender_role,
+                        recipient.username AS recipient_username, recipient.role AS recipient_role
+                 FROM ${db}.support_conversations c
+                 JOIN ${db}.messages m ON m.support_user_id = c.user_id
+                 JOIN ${db}.users sender ON sender.id = m.sender_id
+                 JOIN ${db}.users recipient ON recipient.id = m.recipient_id
+                 WHERE c.user_id = $1
+                 ORDER BY m.sent_at ASC, m.id ASC
+                 LIMIT 500`,
+                [userId],
+            );
+            return response.json({ status: conversation.rows[0].status, messages: result.rows });
+        } catch (error) {
+            return next(error);
+        }
+    });
+
+    app.post("/api/admin/support/conversations/:userId/messages", authenticate, requireRole("admin"), async (request, response, next) => {
+        const userId = parseId(request.params.userId);
+        const body = String(request.body?.body ?? "").trim();
+        if (!userId) return apiError(response, 400, "Invalid support conversation identifier.");
+        if (!body || body.length > 5000) return apiError(response, 400, "Message must be 1–5000 characters.");
+        try {
+            const conversation = await databasePool.query(
+                `SELECT c.user_id, u.username, u.role FROM ${db}.support_conversations c
+                 JOIN ${db}.users u ON u.id = c.user_id
+                 WHERE c.user_id = $1 AND u.role IN ('athlete', 'scout') AND u.is_active = TRUE`,
+                [userId],
+            );
+            if (!conversation.rows[0]) return apiError(response, 404, "Support conversation not found.");
+            const created = await databasePool.query(
+                `INSERT INTO ${db}.messages (sender_id, recipient_id, body, support_user_id)
+                 VALUES ($1, $2, $3, $4)
+                 RETURNING id, sender_id, recipient_id, body, sent_at, is_read, support_user_id`,
+                [request.user.id, userId, body, userId],
+            );
+            await databasePool.query(
+                `UPDATE ${db}.support_conversations SET updated_at = NOW() WHERE user_id = $1`,
+                [userId],
+            );
+            return response.status(201).json({
+                message: {
+                    ...created.rows[0],
+                    sender_username: request.user.username,
+                    sender_role: "admin",
+                    recipient_username: conversation.rows[0].username,
+                    recipient_role: conversation.rows[0].role,
+                },
+            });
+        } catch (error) {
+            return next(error);
+        }
+    });
+
+    app.patch("/api/admin/support/conversations/:userId", authenticate, requireRole("admin"), async (request, response, next) => {
+        const userId = parseId(request.params.userId);
+        const status = request.body?.status;
+        if (!userId) return apiError(response, 400, "Invalid support conversation identifier.");
+        if (!["open", "resolved"].includes(status)) return apiError(response, 400, "Choose open or resolved status.");
+        try {
+            const result = await databasePool.query(
+                `UPDATE ${db}.support_conversations
+                 SET status = $1, updated_at = NOW(),
+                     resolved_at = CASE WHEN $1 = 'resolved' THEN NOW() ELSE NULL END,
+                     resolved_by = CASE WHEN $1 = 'resolved' THEN $2 ELSE NULL END
+                 WHERE user_id = $3
+                 RETURNING user_id, status, updated_at, resolved_at`,
+                [status, request.user.id, userId],
+            );
+            if (!result.rows[0]) return apiError(response, 404, "Support conversation not found.");
+            return response.json({ conversation: result.rows[0] });
         } catch (error) {
             return next(error);
         }
