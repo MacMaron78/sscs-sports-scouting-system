@@ -59,6 +59,9 @@ export function requireAuth(databasePool) {
                 clearSessionCookie(response);
                 return response.status(401).json({ error: "Your password changed. Please log in again." });
             }
+            if (user.role === "admin") {
+                user.verification_status = "verified";
+            }
             request.user = user;
             return next();
         } catch (error) {

@@ -27,7 +27,7 @@ let athleteProfileRecord = {
     performance_stats: {},
     updated_at: "2026-11-14T00:00:00.000Z",
 };
-const agencyProfileRecord = {
+let agencyProfileRecord = {
     id: 4,
     agency_name: "Test Agency",
     country: "Uganda",
@@ -36,6 +36,7 @@ const agencyProfileRecord = {
     updated_at: "2026-11-14T00:00:00.000Z",
 };
 let scoutVerificationStatus = "unverified";
+let registeredScout = null;
 let lastAthleteSearchSql = "";
 const userBlocks = new Set();
 const storedMessages = [];
@@ -51,6 +52,57 @@ const fakePool = {
     async query(sql, values = []) {
         if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) {
             return { rows: [], rowCount: 0 };
+        }
+        if (sql.includes("INSERT INTO") && sql.includes("messages")) {
+            const [senderId, recipientId, body] = values;
+            const blocked = userBlocks.has(`${senderId}:${recipientId}`) || userBlocks.has(`${recipientId}:${senderId}`);
+            if (blocked) return { rows: [], rowCount: 0 };
+            const message = {
+                id: nextMessageId++,
+                sender_id: Number(senderId),
+                recipient_id: Number(recipientId),
+                body,
+                sent_at: "2026-11-14T00:00:00.000Z",
+                is_read: false,
+            };
+            storedMessages.push(message);
+            return { rows: [message], rowCount: 1 };
+        }
+        if (sql.includes("INSERT INTO") && sql.includes(".users") && values.length === 4) {
+            if (values[3] === "scout") {
+                registeredScout = {
+                    id: 4,
+                    username: values[0],
+                    email: values[1],
+                    password_hash: values[2],
+                    role: "scout",
+                    is_active: true,
+                    token_version: 0,
+                    verification_status: "unverified",
+                };
+                return {
+                    rows: [{
+                        id: registeredScout.id,
+                        username: registeredScout.username,
+                        email: registeredScout.email,
+                        role: registeredScout.role,
+                    }],
+                    rowCount: 1,
+                };
+            }
+        }
+        if (sql.includes("INSERT INTO") && sql.includes(".agency_profiles")) {
+            if (registeredScout) {
+                agencyProfileRecord = {
+                    ...agencyProfileRecord,
+                    id: 4,
+                    agency_name: values[1],
+                    country: values[2],
+                    contact_phone: values[3],
+                    contact_details: values[4],
+                };
+            }
+            return { rows: [], rowCount: 1 };
         }
         if (sql.includes("SELECT id FROM") && sql.includes("LOWER(email) = LOWER($1)") && sql.includes(".users")) {
             return values[0].toLowerCase() === "athlete@example.com"
@@ -270,21 +322,6 @@ const fakePool = {
                 rowCount: storedMessages.length,
             };
         }
-        if (sql.includes("INSERT INTO") && sql.includes(".messages")) {
-            const [senderId, recipientId, body] = values;
-            const blocked = userBlocks.has(`${senderId}:${recipientId}`) || userBlocks.has(`${recipientId}:${senderId}`);
-            if (blocked) return { rows: [], rowCount: 0 };
-            const message = {
-                id: nextMessageId++,
-                sender_id: Number(senderId),
-                recipient_id: Number(recipientId),
-                body,
-                sent_at: "2026-11-14T00:00:00.000Z",
-                is_read: false,
-            };
-            storedMessages.push(message);
-            return { rows: [message], rowCount: 1 };
-        }
         if (sql.includes("SELECT sender_id, recipient_id FROM") && sql.includes(".messages")) {
             const message = storedMessages.find((entry) => (
                 String(entry.id) === String(values[0])
@@ -386,13 +423,37 @@ const fakePool = {
                 rowCount: 1,
             };
         }
+        if (sql.includes("FROM \"sscs_api\".agency_profiles a") && sql.includes("WHERE u.id = $1")) {
+            return {
+                rows: [{
+                    ...agencyProfileRecord,
+                    verification_status: registeredScout ? registeredScout.verification_status : scoutVerificationStatus,
+                }],
+                rowCount: 1,
+            };
+        }
         if (sql.includes("FROM \"sscs_api\".agency_profiles a") && sql.includes("WHERE a.user_id = $1")) {
             return {
-                rows: [{ ...agencyProfileRecord, verification_status: scoutVerificationStatus }],
+                rows: [{
+                    ...agencyProfileRecord,
+                    verification_status: registeredScout ? registeredScout.verification_status : scoutVerificationStatus,
+                }],
                 rowCount: 1,
             };
         }
         if (sql.includes("SET verification_status = 'pending'")) {
+            if (registeredScout && Number(values[0]) === registeredScout.id) {
+                registeredScout.verification_status = "pending";
+                scoutVerificationStatus = "pending";
+                return {
+                    rows: [{
+                        verification_status: "pending",
+                        verification_requested_at: "2026-11-14T00:00:00.000Z",
+                        verification_reviewed_at: null,
+                    }],
+                    rowCount: 1,
+                };
+            }
             if (!["unverified", "rejected"].includes(athleteVerification.status)) {
                 return { rows: [], rowCount: 0 };
             }
@@ -413,6 +474,23 @@ const fakePool = {
         }
         if (sql.includes("SET verification_status = $1")) {
             const [status, id, reviewerId] = values;
+            if (registeredScout && String(id) === String(registeredScout.id)) {
+                const canReview = registeredScout.verification_status === "pending" && ["verified", "rejected"].includes(status);
+                const canRevoke = registeredScout.verification_status === "verified" && status === "unverified";
+                if (!canReview && !canRevoke) return { rows: [], rowCount: 0 };
+                registeredScout.verification_status = status;
+                scoutVerificationStatus = status;
+                return {
+                    rows: [{
+                        id: registeredScout.id,
+                        verification_status: status,
+                        verification_requested_at: "2026-11-14T00:00:00.000Z",
+                        verification_reviewed_at: status === "unverified" ? null : "2026-11-14T00:05:00.000Z",
+                        verification_reviewed_by: status === "unverified" ? null : reviewerId,
+                    }],
+                    rowCount: 1,
+                };
+            }
             const canReview = athleteVerification.status === "pending" && ["verified", "rejected"].includes(status);
             const canRevoke = athleteVerification.status === "verified" && status === "unverified";
             if (String(id) !== "1" || (!canReview && !canRevoke)) return { rows: [], rowCount: 0 };
@@ -474,6 +552,16 @@ const fakePool = {
         }
         if (sql.includes("password_hash")) {
             lastLoginIdentifier = values[0];
+            if (String(values[0]).toLowerCase() === "scout.regression@example.com" && registeredScout) {
+                return {
+                    rows: [{
+                        ...registeredScout,
+                        password_hash: registeredScout.password_hash,
+                        has_profile_photo: false,
+                    }],
+                    rowCount: 1,
+                };
+            }
             return {
                 rows: [{
                     id: 1,
@@ -531,7 +619,9 @@ const fakePool = {
         if (sql.includes("SELECT id, username, email, role, is_active")) {
             const id = String(values[0]);
             const user = id === "2"
-                ? { id: 2, username: "test-admin", email: "admin@example.com", role: "admin", is_active: true, token_version: 0, verification_status: "unverified" }
+                ? { id: 2, username: "test-admin", email: "admin@example.com", role: "admin", is_active: true, token_version: 0, verification_status: "verified" }
+                : id === "4" && registeredScout
+                    ? { ...registeredScout, verification_status: registeredScout.verification_status, has_profile_photo: false }
                 : id === "3"
                     ? { id: 3, username: "test-scout", email: "scout@example.com", role: "scout", is_active: true, token_version: 0, verification_status: scoutVerificationStatus }
                     : { id: 1, username: "test-athlete", email: "athlete@example.com", role: "athlete", is_active: true, token_version: testUserTokenVersion, verification_status: athleteVerification.status };
@@ -700,6 +790,122 @@ test("administrator login portal rejects non-administrator accounts", async () =
 
     assert.equal(response.status, 403);
     assert.deepEqual(await response.json(), { error: "Please use the Administrator login portal." });
+});
+
+test("newly registered scouts remain unverified until administrator approval", async () => {
+    registeredScout = null;
+    scoutVerificationStatus = "unverified";
+
+    const registration = await fetch(`${baseUrl}/api/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            username: "scout.regression",
+            email: "scout.regression@example.com",
+            password: "valid-password-123",
+            role: "scout",
+            agencyName: "Regression Scout Agency",
+            country: "Uganda",
+            contactPhone: "+256700000000",
+            contactDetails: "Isolated automated test scout",
+        }),
+    });
+    assert.equal(registration.status, 201);
+    assert.equal(registeredScout.verification_status, "unverified");
+    assert.equal(registeredScout.role, "scout");
+
+    const scoutSession = registration.headers.get("set-cookie");
+    assert.match(scoutSession, /^sscs_session=/);
+
+    const profile = await fetch(`${baseUrl}/api/me/profile`, {
+        headers: { Cookie: scoutSession },
+    });
+    assert.equal(profile.status, 200);
+    const { profileType, profile: scoutProfile } = await profile.json();
+    assert.equal(profileType, "agency");
+    assert.equal(scoutProfile.verification_status, "unverified");
+
+    const unverifiedSearch = await fetch(`${baseUrl}/api/athletes`, {
+        headers: { Cookie: scoutSession },
+    });
+    assert.equal(unverifiedSearch.status, 403);
+
+    const reviewRequest = await fetch(`${baseUrl}/api/me/verification-request`, {
+        method: "POST",
+        headers: { Cookie: scoutSession },
+    });
+    assert.equal(reviewRequest.status, 201);
+    assert.equal((await reviewRequest.json()).verification.verification_status, "pending");
+
+    const adminToken = jwt.sign(
+        { sub: "2", role: "admin" },
+        process.env.JWT_SECRET,
+        { expiresIn: "1h", issuer: "sscs-api", audience: "sscs-web" },
+    );
+    const approval = await fetch(`${baseUrl}/api/admin/users/4/verification`, {
+        method: "PATCH",
+        headers: {
+            Cookie: `sscs_session=${adminToken}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: "verified" }),
+    });
+    assert.equal(approval.status, 200);
+    assert.equal((await approval.json()).verification.verification_status, "verified");
+    assert.equal(registeredScout.verification_status, "verified");
+
+    const verifiedSearch = await fetch(`${baseUrl}/api/athletes`, {
+        headers: { Cookie: scoutSession },
+    });
+    assert.equal(verifiedSearch.status, 200);
+
+    registeredScout = null;
+    scoutVerificationStatus = "unverified";
+    agencyProfileRecord = {
+        id: 4,
+        agency_name: "Test Agency",
+        country: "Uganda",
+        contact_phone: "",
+        contact_details: "",
+        updated_at: "2026-11-14T00:00:00.000Z",
+    };
+});
+
+test("administrators are trusted and cannot be treated as ordinary unverified users", async () => {
+    const adminToken = jwt.sign(
+        { sub: "2", role: "admin" },
+        process.env.JWT_SECRET,
+        { expiresIn: "1h", issuer: "sscs-api", audience: "sscs-web" },
+    );
+    const athleteToken = jwt.sign(
+        { sub: "1", role: "athlete" },
+        process.env.JWT_SECRET,
+        { expiresIn: "1h", issuer: "sscs-api", audience: "sscs-web" },
+    );
+
+    const profile = await fetch(`${baseUrl}/api/me/profile`, {
+        headers: { Cookie: `sscs_session=${adminToken}` },
+    });
+    assert.equal(profile.status, 200);
+    const adminProfile = await profile.json();
+    assert.equal(adminProfile.profileType, "admin");
+    assert.equal(adminProfile.profile.role, "admin");
+    assert.equal(adminProfile.profile.verification_status, "verified");
+
+    const summary = await fetch(`${baseUrl}/api/admin/summary`, {
+        headers: { Cookie: `sscs_session=${adminToken}` },
+    });
+    assert.equal(summary.status, 200);
+
+    const unauthorizedVerify = await fetch(`${baseUrl}/api/admin/users/1/verification`, {
+        method: "PATCH",
+        headers: {
+            Cookie: `sscs_session=${athleteToken}`,
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: "verified" }),
+    });
+    assert.equal(unauthorizedVerify.status, 403);
 });
 
 test("admin user list includes all athlete profile fields", async () => {

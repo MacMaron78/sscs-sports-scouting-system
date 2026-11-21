@@ -1305,12 +1305,16 @@ export function ProfilePage() {
     if (loading) return <PageLoading />;
     if (!profile) return <ErrorNotice error={error || "Profile not found."} />;
 
-    const profileName = profileType === "athlete"
-        ? `${values.firstName || "Your name"} ${values.lastName || ""}`.trim()
-        : values.agencyName || "Your organization";
-    const profileSubtitle = profileType === "athlete"
-        ? [values.sport || "Choose your sport", values.position || "Add your discipline"].join(" / ")
-        : [values.country || "Add your country", "Sports organization"].join(" / ");
+    const profileName = profileType === "admin"
+        ? user.username
+        : profileType === "athlete"
+            ? `${values.firstName || "Your name"} ${values.lastName || ""}`.trim()
+            : values.agencyName || "Your organization";
+    const profileSubtitle = profileType === "admin"
+        ? "SSCS administrator account"
+        : profileType === "athlete"
+            ? [values.sport || "Choose your sport", values.position || "Add your discipline"].join(" / ")
+            : [values.country || "Add your country", "Sports organization"].join(" / ");
     const profileInitials = profileType === "athlete"
         ? `${values.firstName?.[0] || "A"}${values.lastName?.[0] || ""}`
         : (values.agencyName?.[0] || user.username[0]).toUpperCase();
@@ -1375,7 +1379,7 @@ export function ProfilePage() {
             </div>}
             <div className="profile-owner">
                 <span className="profile-owner-icon" aria-hidden="true">◉</span>
-                <div className="profile-owner-identity"><strong>{user.username}</strong><span>{profileType === "athlete" ? "ATHLETE ACCOUNT" : "SCOUT & AGENCY ACCOUNT"}</span></div>
+                <div className="profile-owner-identity"><strong>{user.username}</strong><span>{profileType === "admin" ? "ADMINISTRATOR ACCOUNT" : profileType === "athlete" ? "ATHLETE ACCOUNT" : "SCOUT & AGENCY ACCOUNT"}</span></div>
                 <div className="profile-photo-actions">
                     <label className="button button-outline button-compact profile-photo-control">
                         <input type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadPhoto} disabled={photoUploading} />
@@ -1390,15 +1394,19 @@ export function ProfilePage() {
                 <div>
                     <p className="eyebrow">PROFILE TRUST</p>
                     <h3 id="profile-verification-title">
-                        {profile.verification_status === "verified"
+                        {profileType === "admin"
+                            ? "Verification not required"
+                            : profile.verification_status === "verified"
                             ? <VerificationBadge status={profile.verification_status} />
                             : profile.verification_status === "pending" ? "Review requested" :
                                 profile.verification_status === "rejected" ? "Review not approved" : "Not yet reviewed"}
                     </h3>
-                    <p>An SSCS administrator reviews the profile details, but this does not independently verify sporting claims. Saving actual profile changes resets a previous review; you can then request another review.</p>
+                    <p>{profileType === "admin"
+                        ? "Administrator accounts are trusted system roles and do not require profile approval or verification."
+                        : "An SSCS administrator reviews the profile details, but this does not independently verify sporting claims. Saving actual profile changes resets a previous review; you can then request another review."}</p>
                     {profile.verification_reviewed_at && <small>Last reviewed {formatDate(profile.verification_reviewed_at)}</small>}
                 </div>
-                {(profile.verification_status === "unverified" || profile.verification_status === "rejected") &&
+                {profileType !== "admin" && (profile.verification_status === "unverified" || profile.verification_status === "rejected") &&
                     <button className="button button-outline" type="button" onClick={requestVerification} disabled={verificationSubmitting}>
                         {verificationSubmitting ? "Submitting…" : profile.verification_status === "rejected" ? "Request another review" : "Request profile review"}
                     </button>}
@@ -2235,14 +2243,14 @@ export function AdminDashboardPage() {
             </div>
             <div className="table-scroll"><table><thead><tr><th>Account</th><th>Email address</th><th>Role</th><th>Joined</th><th>Access</th><th>Verification</th><th>Review</th><th>Manage</th><th>Profile data</th></tr></thead>
                 <tbody>{users.map((account) => <tr key={account.id}>
-                    <td><strong className="admin-username"><span>{account.username.slice(0, 1).toUpperCase()}</span>{account.username}<VerifiedAccountTick status={account.verification_status} /></strong></td>
+                    <td><strong className="admin-username"><span>{account.username.slice(0, 1).toUpperCase()}</span>{account.username}<VerifiedAccountTick status={account.verification_status} role={account.role} /></strong></td>
                     <td>{account.email}</td>
                     <td><span className={`admin-role-badge admin-role-${account.role}`}>{account.role === "scout" ? "Scout / Agency" : account.role}</span></td>
                     <td>{formatDate(account.created_at)}</td>
                     <td><span className={`admin-access-status${account.is_active ? " is-active" : ""}`}><i />{account.is_active ? "Active" : "Inactive"}</span></td>
                     <td>
                         <span className={`admin-verification-status is-${account.verification_status || "unverified"}`}>
-                            {account.verification_status || "unverified"}
+                            {account.role === "admin" ? "Verification not required" : (account.verification_status || "unverified")}
                         </span>
                         {account.verification_reviewed_at && <small className="admin-review-date">{formatDate(account.verification_reviewed_at)}</small>}
                     </td>
@@ -2387,7 +2395,7 @@ function AdminAccountDetails({ account }) {
             <dt>Email</dt><dd>{account.email}</dd>
             <dt>Role</dt><dd>{account.role === "scout" ? "Scout / Agency" : account.role}</dd>
             <dt>Account status</dt><dd>{account.is_active ? "Active" : "Inactive"}</dd>
-            <dt>Verification</dt><dd>{account.verification_status || "unverified"}</dd>
+            <dt>Verification</dt><dd>{account.role === "admin" ? "Verification not required" : (account.verification_status || "unverified")}</dd>
             {account.verification_requested_at && <><dt>Review requested</dt><dd>{formatDate(account.verification_requested_at)}</dd></>}
             {account.verification_reviewed_at && <><dt>Last reviewed</dt><dd>{formatDate(account.verification_reviewed_at)}</dd></>}
             {account.verification_reviewed_by && <><dt>Reviewed by admin ID</dt><dd>{account.verification_reviewed_by}</dd></>}

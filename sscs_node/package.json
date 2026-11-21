@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "create-admin": "node src/create-admin.js",
+    "create-admin": "node src/setup.js create-admin:local",
+    "create-admin:production": "node src/setup.js create-admin:production",
+    "verify:production-db": "node src/setup.js verify:production-db",
     "test": "node --test"
   },
   "engines": {

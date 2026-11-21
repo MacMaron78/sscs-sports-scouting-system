@@ -20,7 +20,7 @@ In the first terminal, configure and start the API:
 
 ```powershell
 cd .\sscs_node
-Copy-Item .env.example .env
+if (!(Test-Path .env)) { Copy-Item .env.example .env } else { Write-Host ".env already exists; leaving it unchanged." }
 notepad .env
 ```
 
@@ -34,7 +34,7 @@ npm run create-admin
 npm run dev
 ```
 
-`npm run create-admin` prompts for an administrator username, email, and hidden password. Create this admin before testing the admin dashboard.
+`npm run create-admin` loads only `sscs_node/.env` and is restricted to the local `localhost`/`127.0.0.1` database named `sscs_db`. It prompts for an administrator username, email, and hidden password. Create this admin before testing the admin dashboard. The setup command does not create or alter database tables; the application server initializes the schema when it starts.
 
 In the second terminal:
 
@@ -46,6 +46,38 @@ npm run dev
 ```
 
 Open `http://localhost:5173`. Keep both development servers running. Register an athlete and a Scout/Agency account in this React app to test its features. The Django admin user and Django data do not automatically appear in the React app.
+
+## Production Neon database and first administrator
+
+Production setup commands are opt-in and read `sscs_node/.env.production`; ordinary local development and `npm run create-admin` never load that file. Keep the existing `.env` configured for localhost and do not replace it with production credentials.
+
+Create a separate production configuration file from the non-secret template:
+
+```powershell
+cd .\sscs_node
+if (!(Test-Path .env.production)) { Copy-Item .env.production.example .env.production } else { Write-Host ".env.production already exists; leaving it unchanged." }
+notepad .env.production
+```
+
+Set `DATABASE_URL` to the Neon connection string for database `neondb`, and set `PGSCHEMA=sscs_api`. The connection hostname must be a Neon `*.neon.tech` host. Keep the connection string private; URL-encode special characters in its username or password. `DATABASE_URL` takes precedence over individual `PG*` variables in the backend. The production commands load only the explicitly selected environment file and reject a non-Neon host, a database other than `neondb`, or a schema other than `sscs_api`.
+
+Verify the configured Neon connection before creating an account:
+
+```powershell
+npm run verify:production-db
+```
+
+This makes read-only checks for the connected database, the `sscs_api` schema, and `SELECT 1`. It displays only the provider, database name, schema, and check result—not connection details or secrets. Verification does not initialize, migrate, or modify the schema.
+
+Create the first production administrator only after verification succeeds:
+
+```powershell
+npm run create-admin:production
+```
+
+The command rechecks the database identity and schema, requires the exact confirmation `CREATE ADMIN`, then prompts for a validated username, email, and hidden password (with confirmation). It stores only a bcrypt hash using 12 salt rounds. It does not create or alter tables. Duplicate usernames/emails are reported without exposing account details. Both setup commands close the database connection when finished.
+
+The repository ignores `.env`, `.env.*`, and nested environment files while allowing only the example templates. Never commit, screenshot, paste, or print `.env` or `.env.production`; do not put credentials in command-line arguments. The local admin command is deliberately limited to localhost `sscs_db`, while the production commands are deliberately limited to Neon `neondb` and `sscs_api`, helping prevent an accidental cross-environment setup.
 
 ## Quick start (PowerShell)
 

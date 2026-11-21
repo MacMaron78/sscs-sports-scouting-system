@@ -376,8 +376,8 @@ export function VerificationBadge({ status }) {
     </span>;
 }
 
-export function VerifiedAccountTick({ status }) {
-    if (status !== "verified") return null;
+export function VerifiedAccountTick({ status, role }) {
+    if (role === "admin" || status !== "verified") return null;
     return <span
         className="verified-account-tick"
         role="img"

@@ -486,6 +486,18 @@ export function createApp(databasePool) {
 
     app.get("/api/me/profile", authenticate, async (request, response, next) => {
         try {
+            if (request.user.role === "admin") {
+                return response.json({
+                    profileType: "admin",
+                    profile: {
+                        id: request.user.id,
+                        role: "admin",
+                        username: request.user.username,
+                        verification_status: "verified",
+                        has_profile_photo: request.user.has_profile_photo,
+                    },
+                });
+            }
             if (request.user.role === "athlete") {
                 const result = await databasePool.query(
                     `SELECT ${projection}, u.verification_requested_at, u.verification_reviewed_at
