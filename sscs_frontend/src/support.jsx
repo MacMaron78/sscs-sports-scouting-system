@@ -3,8 +3,8 @@ import { api, formatDate } from "./api";
 import { useAuth } from "./auth";
 import { ErrorNotice, Loading } from "./components";
 
-function SupportMessageList({ messages, currentUserId }) {
-    return <div className="support-message-list" aria-live="polite">
+function SupportMessageList({ messages, currentUserId, listRef }) {
+    return <div className="support-message-list" aria-live="polite" ref={listRef}>
         {messages.map((message) => {
             const ownMessage = String(message.sender_id) === String(currentUserId);
             return <article className={`support-message${ownMessage ? " is-own" : ""}`} key={message.id}>
@@ -55,12 +55,18 @@ export function SupportInboxPage() {
     const [loading, setLoading] = useState(true);
     const [sending, setSending] = useState(false);
     const [error, setError] = useState("");
-    const bottomRef = useRef(null);
+    const messageListRef = useRef(null);
+    const shouldScrollMessagesRef = useRef(false);
 
     const loadMessages = useCallback(async (showLoading = false) => {
         if (showLoading) setLoading(true);
         try {
             const result = await api("/support/messages");
+            const messageList = messageListRef.current;
+            if (!messageList
+                || messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 48) {
+                shouldScrollMessagesRef.current = true;
+            }
             setMessages(result.messages);
             setStatus(result.status);
             setError("");
@@ -78,7 +84,11 @@ export function SupportInboxPage() {
     }, [loadMessages]);
 
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+        const messageList = messageListRef.current;
+        if (messageList && shouldScrollMessagesRef.current) {
+            messageList.scrollTop = messageList.scrollHeight;
+            shouldScrollMessagesRef.current = false;
+        }
     }, [messages]);
 
     async function sendMessage(body) {
@@ -86,6 +96,7 @@ export function SupportInboxPage() {
         setError("");
         try {
             const { message } = await api("/support/messages", { method: "POST", body: { body } });
+            shouldScrollMessagesRef.current = true;
             setMessages((current) => [...current, message]);
             setStatus("open");
             window.dispatchEvent(new Event("sscs:refresh-admin-alerts"));
@@ -111,12 +122,11 @@ export function SupportInboxPage() {
                 <span className={`support-status is-${status}`}>{status === "resolved" ? "Resolved" : "Open"}</span>
             </div>
             {loading ? <Loading label="Loading support conversation…" /> : messages.length
-                ? <SupportMessageList messages={messages} currentUserId={user.id} />
+                ? <SupportMessageList messages={messages} currentUserId={user.id} listRef={messageListRef} />
                 : <div className="support-empty-state">
                     <strong>How can we help?</strong>
                     <p>Send a message to start a conversation with the SSCS administrator.</p>
                 </div>}
-            <span ref={bottomRef} />
             <SupportComposer onSend={sendMessage} sending={sending} />
         </section>
     </section>;
@@ -132,7 +142,8 @@ export function AdminSupportInbox() {
     const [threadLoading, setThreadLoading] = useState(false);
     const [sending, setSending] = useState(false);
     const [error, setError] = useState("");
-    const bottomRef = useRef(null);
+    const messageListRef = useRef(null);
+    const shouldScrollMessagesRef = useRef(false);
     const selectedUserIdRef = useRef("");
     const threadRequestIdRef = useRef(0);
 
@@ -144,6 +155,7 @@ export function AdminSupportInbox() {
             setMessages([]);
             setStatus("open");
             setThreadLoading(Boolean(nextUserId));
+            shouldScrollMessagesRef.current = true;
         }
         setSelectedUserId(nextUserId);
     }, []);
@@ -168,7 +180,7 @@ export function AdminSupportInbox() {
         }
     }, [selectConversation]);
 
-    const loadThread = useCallback(async (userId, showLoading = false) => {
+    const loadThread = useCallback(async (userId, showLoading = false, forceScroll = false) => {
         if (!userId) return;
         const requestedUserId = String(userId);
         if (selectedUserIdRef.current !== requestedUserId) return;
@@ -178,6 +190,11 @@ export function AdminSupportInbox() {
             const result = await api(`/admin/support/conversations/${userId}/messages`);
             if (requestId !== threadRequestIdRef.current
                 || selectedUserIdRef.current !== requestedUserId) return;
+            const messageList = messageListRef.current;
+            if (forceScroll || !messageList
+                || messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 48) {
+                shouldScrollMessagesRef.current = true;
+            }
             setMessages(result.messages);
             setStatus(result.status);
             setConversations((current) => current.map((conversation) => (
@@ -221,7 +238,11 @@ export function AdminSupportInbox() {
     }, [loadThread, selectedUserId]);
 
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+        const messageList = messageListRef.current;
+        if (messageList && shouldScrollMessagesRef.current) {
+            messageList.scrollTop = messageList.scrollHeight;
+            shouldScrollMessagesRef.current = false;
+        }
     }, [messages]);
 
     async function sendReply(body) {
@@ -233,7 +254,7 @@ export function AdminSupportInbox() {
                 method: "POST",
                 body: { body },
             });
-            await Promise.all([loadThread(selectedUserId), loadConversations()]);
+            await Promise.all([loadThread(selectedUserId, false, true), loadConversations()]);
         } catch (requestError) {
             setError(requestError.message);
             return false;
@@ -300,9 +321,8 @@ export function AdminSupportInbox() {
                         </button>
                     </div>
                     {threadLoading ? <Loading label="Loading conversation…" /> : messages.length
-                        ? <SupportMessageList messages={messages} currentUserId={user?.id} />
+                        ? <SupportMessageList messages={messages} currentUserId={user?.id} listRef={messageListRef} />
                         : <div className="support-empty-state"><strong>No messages in this conversation</strong></div>}
-                    <span ref={bottomRef} />
                     <SupportComposer onSend={sendReply} sending={sending} />
                 </> : <div className="support-empty-state"><strong>Select a conversation</strong><p>Choose a user from the support inbox to view and reply.</p></div>}
             </div>

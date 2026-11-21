@@ -38,6 +38,7 @@ let agencyProfileRecord = {
 let scoutVerificationStatus = "unverified";
 let registeredScout = null;
 let lastAthleteSearchSql = "";
+let lastSupportStatusUpdateSql = "";
 const userBlocks = new Set();
 const storedMessages = [];
 const supportMessages = [];
@@ -107,6 +108,7 @@ const fakePool = {
         }
         if (sql.includes("UPDATE") && sql.includes(".support_conversations")
             && sql.includes("SET status = $1")) {
+            lastSupportStatusUpdateSql = sql;
             const [status, resolverId, userId] = values;
             const conversation = supportConversations.get(Number(userId));
             if (!conversation) return { rows: [], rowCount: 0 };
@@ -1299,6 +1301,7 @@ test("support inbox isolates athlete and scout conversations and supports admin 
     assert.equal(resolvedPayload.conversation.status, "resolved");
     assert.equal(resolvedPayload.conversation.resolved_at, supportConversations.get(1).resolved_at);
     assert.equal(supportConversations.get(1).resolved_by, 2);
+    assert.equal((lastSupportStatusUpdateSql.match(/CASE WHEN \$1::varchar = 'resolved'/g) || []).length, 2);
     const adminReopened = await fetch(`${baseUrl}/api/admin/support/conversations/1`, {
         method: "PATCH",
         headers: adminHeaders,
