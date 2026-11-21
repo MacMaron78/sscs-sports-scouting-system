@@ -3169,7 +3169,7 @@ body, input, textarea, select, button { color-scheme: dark; }
     .app-workspace .main-content { width: calc(100% - 38px); }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 768px) {
     .app-shell { display: flex; flex-direction: column; }
     .app-sidebar {
         position: sticky;
@@ -3208,10 +3208,11 @@ body, input, textarea, select, button { color-scheme: dark; }
     .sidebar-nav-icon { width: 21px; height: 21px; flex-basis: 21px; }
     .app-sidebar .navigation a.active::before { top: auto; right: 12px; bottom: -1px; left: 12px; width: auto; height: 2px; }
     .app-workspace { min-height: calc(100vh - 110px); }
+    .app-shell .app-workspace .topbar,
     .app-workspace .topbar,
     .home-shell .app-workspace .topbar,
     .login-shell .app-workspace .topbar {
-        position: sticky;
+        position: static;
         min-height: 56px;
         padding-right: 15px;
         padding-left: 15px;
@@ -6591,7 +6592,7 @@ form.portal-form {
     color: #526581;
 }
 
-@media (max-width: 680px) {
+@media (max-width: 768px) {
     .app-sidebar {
         border-bottom-color: #e0e8f3;
         background: rgb(255 255 255 / 96%);
@@ -9036,11 +9037,16 @@ form.portal-form {
 .home-page .bottom-cta p:last-child { max-width: 560px; font-size: .86rem; line-height: 1.65; }
 .home-page .bottom-cta .button-white { min-height: 44px; padding: 0 18px; border-radius: 11px; }
 
+@media (max-width: 1180px) {
+    .home-pathways { grid-template-columns: minmax(0, 1fr); }
+}
+
 @media (max-width: 900px) {
     .home-page .editorial-hero { min-height: 700px; padding-right: 5vw; padding-left: 5vw; }
     .editorial-hero .hero-copy { max-width: 64%; }
     .editorial-art { right: -1vw; width: 43vw; height: 43vw; }
     .hero-network-card { display: none; }
+    .home-pathways { grid-template-columns: minmax(0, 1fr); }
     .home-page .editorial-steps { width: min(100% - 46px, 740px); }
     .editorial-step-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .editorial-step-grid .step-card:last-child { grid-column: 1 / -1; min-height: 190px; }
@@ -9085,6 +9091,7 @@ form.portal-form {
     .home-pathways { gap: 25px; padding: 52px 19px; }
     .pathway-heading h2 { font-size: clamp(2rem, 9vw, 2.7rem); }
     .pathway-grid { grid-template-columns: minmax(0, 1fr); }
+    .home-pathways { grid-template-columns: minmax(0, 1fr); }
     .pathway-card { min-height: 245px; }
     .home-page .bottom-cta { width: calc(100% - 28px); margin: 40px auto; padding: 28px 22px; }
     .home-page .bottom-cta .button-white { align-self: flex-start; }
@@ -9099,6 +9106,10 @@ form.portal-form {
     .editorial-hero .hero-actions { align-items: stretch; flex-direction: column; }
     .editorial-hero .hero-actions .button { justify-content: center; }
     .home-page .editorial-metrics .metric div > span { font-size: .72rem; }
+}
+
+@media (max-width: 520px) {
+    body { min-width: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
