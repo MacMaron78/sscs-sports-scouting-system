@@ -1302,6 +1302,7 @@ test("support inbox isolates athlete and scout conversations and supports admin 
     assert.equal(resolvedPayload.conversation.resolved_at, supportConversations.get(1).resolved_at);
     assert.equal(supportConversations.get(1).resolved_by, 2);
     assert.equal((lastSupportStatusUpdateSql.match(/CASE WHEN \$1::varchar = 'resolved'/g) || []).length, 2);
+    assert.ok(lastSupportStatusUpdateSql.includes("THEN $2::bigint ELSE NULL END"));
     const adminReopened = await fetch(`${baseUrl}/api/admin/support/conversations/1`, {
         method: "PATCH",
         headers: adminHeaders,

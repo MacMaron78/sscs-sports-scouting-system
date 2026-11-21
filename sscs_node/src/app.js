@@ -1225,7 +1225,7 @@ export function createApp(databasePool) {
                 `UPDATE ${db}.support_conversations
                  SET status = $1, updated_at = NOW(),
                      resolved_at = CASE WHEN $1::varchar = 'resolved' THEN NOW() ELSE NULL END,
-                     resolved_by = CASE WHEN $1::varchar = 'resolved' THEN $2 ELSE NULL END
+                     resolved_by = CASE WHEN $1::varchar = 'resolved' THEN $2::bigint ELSE NULL END
                  WHERE user_id = $3
                  RETURNING user_id, status, updated_at, resolved_at`,
                 [status, request.user.id, userId],
