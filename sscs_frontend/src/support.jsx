@@ -245,21 +245,26 @@ export function AdminSupportInbox() {
 
     async function updateStatus(nextStatus) {
         if (!selectedUserId) return;
+        const requestedUserId = selectedUserId;
         setError("");
         try {
-            const result = await api(`/admin/support/conversations/${selectedUserId}`, {
+            const result = await api(`/admin/support/conversations/${requestedUserId}`, {
                 method: "PATCH",
                 body: { status: nextStatus },
             });
-            setStatus(result.conversation.status);
             setConversations((current) => current.map((conversation) => (
-                String(conversation.user_id) === selectedUserId
+                String(conversation.user_id) === requestedUserId
                     ? { ...conversation, status: result.conversation.status }
                     : conversation
             )));
+            if (selectedUserIdRef.current === requestedUserId) {
+                setStatus(result.conversation.status);
+            }
             await loadConversations();
         } catch (requestError) {
-            setError(requestError.message);
+            if (selectedUserIdRef.current === requestedUserId) {
+                setError(requestError.message);
+            }
         }
     }
 

@@ -1168,24 +1168,36 @@ export function createApp(databasePool) {
         const body = String(request.body?.body ?? "").trim();
         if (!userId) return apiError(response, 400, "Invalid support conversation identifier.");
         if (!body || body.length > 5000) return apiError(response, 400, "Message must be 1–5000 characters.");
+        let client;
+        let transactionStarted = false;
         try {
-            const conversation = await databasePool.query(
+            client = await databasePool.connect();
+            await client.query("BEGIN");
+            transactionStarted = true;
+            const conversation = await client.query(
                 `SELECT c.user_id, u.username, u.role FROM ${db}.support_conversations c
                  JOIN ${db}.users u ON u.id = c.user_id
-                 WHERE c.user_id = $1 AND u.role IN ('athlete', 'scout') AND u.is_active = TRUE`,
+                 WHERE c.user_id = $1 AND u.role IN ('athlete', 'scout') AND u.is_active = TRUE
+                 FOR UPDATE OF c`,
                 [userId],
             );
-            if (!conversation.rows[0]) return apiError(response, 404, "Support conversation not found.");
-            const created = await databasePool.query(
+            if (!conversation.rows[0]) {
+                await client.query("ROLLBACK");
+                transactionStarted = false;
+                return apiError(response, 404, "Support conversation not found.");
+            }
+            const created = await client.query(
                 `INSERT INTO ${db}.messages (sender_id, recipient_id, body, support_user_id)
                  VALUES ($1, $2, $3, $4)
                  RETURNING id, sender_id, recipient_id, body, sent_at, is_read, support_user_id`,
                 [request.user.id, userId, body, userId],
             );
-            await databasePool.query(
+            await client.query(
                 `UPDATE ${db}.support_conversations SET updated_at = NOW() WHERE user_id = $1`,
                 [userId],
             );
+            await client.query("COMMIT");
+            transactionStarted = false;
             return response.status(201).json({
                 message: {
                     ...created.rows[0],
@@ -1196,7 +1208,10 @@ export function createApp(databasePool) {
                 },
             });
         } catch (error) {
+            if (transactionStarted) await client.query("ROLLBACK");
             return next(error);
+        } finally {
+            client?.release();
         }
     });
 

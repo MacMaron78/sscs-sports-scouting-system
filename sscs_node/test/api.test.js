@@ -42,6 +42,8 @@ const userBlocks = new Set();
 const storedMessages = [];
 const supportMessages = [];
 const supportConversations = new Map();
+const supportReplyTransactionQueries = [];
+let failNextSupportActivityUpdate = false;
 const storedReports = [];
 const storedPasswordResetRequests = [];
 const storedPasswordResetAudit = [];
@@ -117,6 +119,10 @@ const fakePool = {
             return { rows: [{ user_id: Number(userId), status, updated_at: conversation.updated_at, resolved_at: conversation.resolved_at }], rowCount: 1 };
         }
         if (sql.includes("UPDATE") && sql.includes(".support_conversations SET updated_at")) {
+            if (failNextSupportActivityUpdate) {
+                failNextSupportActivityUpdate = false;
+                throw new Error("Injected support activity update failure.");
+            }
             const conversation = supportConversations.get(Number(values[0]));
             if (conversation) conversation.updated_at = "2026-11-14T00:10:00.000Z";
             return { rows: [], rowCount: conversation ? 1 : 0 };
@@ -788,7 +794,32 @@ const fakePool = {
         return { rows: [{ "?column?": 1 }], rowCount: 1 };
     },
     async connect() {
-        return { query: this.query.bind(this), release() {} };
+        const query = this.query.bind(this);
+        let transactionSnapshot;
+        return {
+            async query(sql, values) {
+                supportReplyTransactionQueries.push(sql);
+                if (sql === "BEGIN") {
+                    transactionSnapshot = {
+                        messages: supportMessages.map((message) => ({ ...message })),
+                        conversations: new Map([...supportConversations].map(([userId, conversation]) => (
+                            [userId, { ...conversation }]
+                        ))),
+                    };
+                }
+                const result = await query(sql, values);
+                if (sql === "ROLLBACK" && transactionSnapshot) {
+                    supportMessages.splice(0, supportMessages.length, ...transactionSnapshot.messages);
+                    supportConversations.clear();
+                    for (const [userId, conversation] of transactionSnapshot.conversations) {
+                        supportConversations.set(userId, conversation);
+                    }
+                }
+                if (sql === "COMMIT" || sql === "ROLLBACK") transactionSnapshot = null;
+                return result;
+            },
+            release() {},
+        };
     },
 };
 
@@ -1194,6 +1225,7 @@ test("support inbox isolates athlete and scout conversations and supports admin 
     assert.equal(adminThread.status, 200);
     assert.equal((await adminThread.json()).messages[0].is_read, true);
 
+    supportReplyTransactionQueries.splice(0);
     const reply = await fetch(`${baseUrl}/api/admin/support/conversations/1/messages`, {
         method: "POST",
         headers: adminHeaders,
@@ -1206,6 +1238,38 @@ test("support inbox isolates athlete and scout conversations and supports admin 
     const replyPayload = await reply.json();
     assert.equal(replyPayload.message.sender_role, "admin");
     assert.equal(replyPayload.message.support_user_id, 1);
+    assert.equal(supportReplyTransactionQueries[0], "BEGIN");
+    const replyInsertIndex = supportReplyTransactionQueries.findIndex((sql) => (
+        sql.includes("INSERT INTO") && sql.includes(".messages")
+    ));
+    const activityUpdateIndex = supportReplyTransactionQueries.findIndex((sql) => (
+        sql.includes("UPDATE") && sql.includes(".support_conversations SET updated_at")
+    ));
+    assert.ok(replyInsertIndex > 0);
+    assert.ok(activityUpdateIndex > replyInsertIndex);
+    assert.equal(supportReplyTransactionQueries.at(-1), "COMMIT");
+
+    const messageCountBeforeFailedReply = supportMessages.length;
+    const activityBeforeFailedReply = supportConversations.get(1).updated_at;
+    supportReplyTransactionQueries.splice(0);
+    failNextSupportActivityUpdate = true;
+    const originalConsoleError = console.error;
+    console.error = () => {};
+    let failedReply;
+    try {
+        failedReply = await fetch(`${baseUrl}/api/admin/support/conversations/1/messages`, {
+            method: "POST",
+            headers: adminHeaders,
+            body: JSON.stringify({ body: "This reply must roll back." }),
+        });
+    } finally {
+        console.error = originalConsoleError;
+    }
+    assert.equal(failedReply.status, 500);
+    assert.equal((await failedReply.json()).error, "An unexpected server error occurred.");
+    assert.equal(supportMessages.length, messageCountBeforeFailedReply);
+    assert.equal(supportConversations.get(1).updated_at, activityBeforeFailedReply);
+    assert.equal(supportReplyTransactionQueries.at(-1), "ROLLBACK");
 
     const athleteUnread = await fetch(`${baseUrl}/api/messages/unread`, { headers: athleteHeaders });
     assert.equal((await athleteUnread.json()).supportUnreadCount, 1);
@@ -1231,7 +1295,26 @@ test("support inbox isolates athlete and scout conversations and supports admin 
         body: JSON.stringify({ status: "resolved" }),
     });
     assert.equal(resolved.status, 200);
-    assert.equal((await resolved.json()).conversation.status, "resolved");
+    const resolvedPayload = await resolved.json();
+    assert.equal(resolvedPayload.conversation.status, "resolved");
+    assert.equal(resolvedPayload.conversation.resolved_at, supportConversations.get(1).resolved_at);
+    assert.equal(supportConversations.get(1).resolved_by, 2);
+    const adminReopened = await fetch(`${baseUrl}/api/admin/support/conversations/1`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({ status: "open" }),
+    });
+    assert.equal(adminReopened.status, 200);
+    const reopenedPayload = await adminReopened.json();
+    assert.equal(reopenedPayload.conversation.status, "open");
+    assert.equal(reopenedPayload.conversation.resolved_at, null);
+    assert.equal(supportConversations.get(1).resolved_by, null);
+    const resolvedAgain = await fetch(`${baseUrl}/api/admin/support/conversations/1`, {
+        method: "PATCH",
+        headers: adminHeaders,
+        body: JSON.stringify({ status: "resolved" }),
+    });
+    assert.equal(resolvedAgain.status, 200);
     const statusResponse = await fetch(`${baseUrl}/api/support/messages`, { headers: athleteHeaders });
     const resolvedHistory = await statusResponse.json();
     assert.equal(statusResponse.status, 200, JSON.stringify(resolvedHistory));

@@ -141,6 +141,12 @@ CREATE TABLE IF NOT EXISTS sscs_api.support_conversations (
     resolved_by BIGINT REFERENCES sscs_api.users(id) ON DELETE SET NULL
 );
 
+ALTER TABLE sscs_api.support_conversations
+    ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+ALTER TABLE sscs_api.support_conversations
+    ADD COLUMN IF NOT EXISTS resolved_by BIGINT
+        REFERENCES sscs_api.users(id) ON DELETE SET NULL;
+
 CREATE INDEX IF NOT EXISTS sscs_api_support_conversations_queue_idx
     ON sscs_api.support_conversations (status, updated_at DESC);
 
