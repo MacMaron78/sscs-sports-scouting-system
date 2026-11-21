@@ -67,6 +67,9 @@ function setUpdatedFields(fields, startIndex = 1) {
 
 export function createApp(databasePool) {
     const app = express();
+
+    app.set("trust proxy", 1);
+
     const frontendOrigin = process.env.FRONTEND_ORIGIN || process.env.RENDER_EXTERNAL_URL || "http://localhost:5173";
     const allowedFrontendOrigins = new Set([frontendOrigin]);
     if (process.env.NODE_ENV !== "production") {
