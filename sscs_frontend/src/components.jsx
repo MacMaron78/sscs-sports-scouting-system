@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, Outlet, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Camera, House, LayoutDashboard, LifeBuoy, LogIn, LogOut, Menu, Shield, UserPlus, X } from "lucide-react";
 import { useAuth } from "./auth";
 import { api, profilePhotoUrl } from "./api";
 
@@ -53,6 +54,7 @@ export function Layout() {
     const [profilePhotoUploading, setProfilePhotoUploading] = useState(false);
     const [profilePhotoVersion, setProfilePhotoVersion] = useState(0);
     const [profilePhotoNotice, setProfilePhotoNotice] = useState(null);
+    const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
     async function uploadProfilePhoto(event) {
         const file = event.target.files?.[0];
@@ -237,6 +239,35 @@ export function Layout() {
         };
     }, []);
 
+    useEffect(() => {
+        setMobileMenuOpen(false);
+    }, [location.pathname, location.hash]);
+
+    const navigationRole = loading ? "loading" : user?.role ?? "guest";
+    const navigationItems = [
+        { id: "home", to: "/", label: "Home", icon: "home", mobileIcon: House, end: true, mobile: true },
+        { id: "athlete-dashboard", to: "/athlete-dashboard", label: "Dashboard", icon: "dashboard", mobileIcon: LayoutDashboard, roles: ["athlete"], mobile: true },
+        { id: "athlete-profile", to: "/profile", label: "My profile", icon: "profile", roles: ["athlete"] },
+        { id: "athlete-agencies", to: "/agencies", label: "Agencies", icon: "agencies", roles: ["athlete"] },
+        { id: "athlete-inbox", to: "/inbox", label: "Inbox", icon: "inbox", roles: ["athlete"], badge: unreadCount, badgeLabel: "unread messages" },
+        { id: "athlete-support", to: "/support", label: "Contact Admin", mobileLabel: "Support", accessibleMobileLabel: "Support Inbox", icon: "inbox", mobileIcon: LifeBuoy, roles: ["athlete"], badge: supportUnreadCount, badgeLabel: "unread support messages", mobile: true, end: true },
+        { id: "scout-dashboard", to: "/scout-dashboard", label: "Dashboard", icon: "dashboard", mobileIcon: LayoutDashboard, roles: ["scout"], mobile: true },
+        { id: "scout-search", to: "/athletes", label: "Find athletes", icon: "search", roles: ["scout"] },
+        { id: "scout-shortlist", to: "/shortlist", label: "Shortlist", icon: "shortlist", roles: ["scout"] },
+        { id: "scout-agencies", to: "/agencies", label: "Agencies", icon: "agencies", roles: ["scout"] },
+        { id: "scout-inbox", to: "/inbox", label: "Inbox", icon: "inbox", roles: ["scout"], badge: unreadCount, badgeLabel: "unread messages" },
+        { id: "scout-support", to: "/support", label: "Contact Admin", mobileLabel: "Support", accessibleMobileLabel: "Support Inbox", icon: "inbox", mobileIcon: LifeBuoy, roles: ["scout"], badge: supportUnreadCount, badgeLabel: "unread support messages", mobile: true, end: true },
+        { id: "scout-profile", to: "/profile", label: "Agency profile", icon: "profile", roles: ["scout"] },
+        { id: "admin-console", to: "/admin", label: "Admin console", mobileLabel: "Admin", accessibleMobileLabel: "Admin Console", desktopTitle: "Admin console", shortLabel: "Admin", icon: "reports", mobileIcon: Shield, roles: ["admin"], badge: pendingApprovalCount, badgeLabel: "administrator requests need review", badgeType: "approval", mobile: true, end: true },
+        { id: "admin-support", to: "/admin#support-inbox", label: "Support Inbox", mobileLabel: "Support", accessibleMobileLabel: "Support Inbox", shortLabel: "Support", icon: "inbox", mobileIcon: LifeBuoy, roles: ["admin"], badge: supportUnreadCount, badgeLabel: "unread support conversations", badgeType: "approval", mobile: true, end: true },
+        { id: "guest-login", to: "/login", label: "Log in", mobileLabel: "Login", icon: "inbox", mobileIcon: LogIn, roles: ["guest"], desktop: false, mobile: true, end: true },
+        { id: "guest-register", to: "/register", label: "Get started", mobileLabel: "Join", icon: "inbox", mobileIcon: UserPlus, roles: ["guest"], desktop: false, mobile: true },
+    ];
+    const canShowNavigationItem = (item) => !item.roles || item.roles.includes(navigationRole);
+    const desktopNavigationItems = navigationItems.filter((item) => item.desktop !== false && canShowNavigationItem(item));
+    const mobileNavigationItems = navigationItems.filter((item) => item.mobile && canShowNavigationItem(item));
+    const moreNavigationItems = desktopNavigationItems.filter((item) => !item.mobile);
+
     return (
         <div className={`app-shell${location.pathname === "/" ? " home-shell" : ""}${location.pathname.startsWith("/login") ? " login-shell" : ""}${location.pathname.startsWith("/admin") ? " admin-shell" : ""}`}>
             <span className="ball-pointer" ref={pointerRef} aria-hidden="true" />
@@ -245,39 +276,56 @@ export function Layout() {
                     <span className="brand-icon">S</span>
                     <span>SSCS<small>SPORTS SCOUTING</small></span>
                 </Link>
+                {moreNavigationItems.length > 0 && <div className="mobile-more">
+                    <button
+                        className="mobile-more-toggle"
+                        type="button"
+                        aria-label={mobileMenuOpen ? "Close navigation menu" : "More navigation"}
+                        aria-controls="mobile-more-menu"
+                        aria-expanded={mobileMenuOpen}
+                        onClick={() => setMobileMenuOpen((open) => !open)}
+                    >
+                        {mobileMenuOpen
+                            ? <X size={20} aria-hidden="true" focusable="false" />
+                            : <Menu size={20} aria-hidden="true" focusable="false" />}
+                    </button>
+                    <nav id="mobile-more-menu" className="mobile-more-menu" aria-label="More navigation" hidden={!mobileMenuOpen}>
+                        {moreNavigationItems.map((item) => <NavLink
+                            key={item.id}
+                            to={item.to}
+                            end={item.end}
+                            className={({ isActive }) => `mobile-more-link${isActive ? " is-active" : ""}`}
+                        >
+                            <span className="sidebar-nav-icon"><SidebarIcon name={item.icon} /></span>
+                            <span>{item.label}</span>
+                            {item.badge > 0 && <span
+                                className={item.badgeType === "approval" ? "sidebar-approval-badge" : "sidebar-unread-badge"}
+                                aria-label={`${item.badge} ${item.badgeLabel}`}
+                            >{item.badge > 99 ? "99+" : item.badge}</span>}
+                        </NavLink>)}
+                    </nav>
+                </div>}
                 <div className="sidebar-section-label"><span /> WORKSPACE</div>
                 <nav className="navigation" aria-label="Main navigation">
-                    <NavLink to="/" end><span className="sidebar-nav-icon"><SidebarIcon name="home" /></span>Home</NavLink>
-                    {user?.role === "athlete" && <>
-                        <NavLink to="/athlete-dashboard"><span className="sidebar-nav-icon"><SidebarIcon name="dashboard" /></span>Dashboard</NavLink>
-                        <NavLink to="/profile"><span className="sidebar-nav-icon"><SidebarIcon name="profile" /></span>My profile</NavLink>
-                        <NavLink to="/agencies"><span className="sidebar-nav-icon"><SidebarIcon name="agencies" /></span>Agencies</NavLink>
-                        <NavLink to="/inbox"><span className="sidebar-nav-icon"><SidebarIcon name="inbox" /></span>Inbox{unreadCount > 0 && <span className="sidebar-unread-badge" aria-label={`${unreadCount} unread messages`}>{unreadCount > 99 ? "99+" : unreadCount}</span>}</NavLink>
-                        <NavLink to="/support"><span className="sidebar-nav-icon"><SidebarIcon name="inbox" /></span>Contact Admin{supportUnreadCount > 0 && <span className="sidebar-unread-badge" aria-label={`${supportUnreadCount} unread support messages`}>{supportUnreadCount > 99 ? "99+" : supportUnreadCount}</span>}</NavLink>
-                    </>}
-                    {user?.role === "scout" && <>
-                        <NavLink to="/scout-dashboard"><span className="sidebar-nav-icon"><SidebarIcon name="dashboard" /></span>Dashboard</NavLink>
-                        <NavLink to="/athletes"><span className="sidebar-nav-icon"><SidebarIcon name="search" /></span>Find athletes</NavLink>
-                        <NavLink to="/shortlist"><span className="sidebar-nav-icon"><SidebarIcon name="shortlist" /></span>Shortlist</NavLink>
-                        <NavLink to="/agencies"><span className="sidebar-nav-icon"><SidebarIcon name="agencies" /></span>Agencies</NavLink>
-                        <NavLink to="/inbox"><span className="sidebar-nav-icon"><SidebarIcon name="inbox" /></span>Inbox{unreadCount > 0 && <span className="sidebar-unread-badge" aria-label={`${unreadCount} unread messages`}>{unreadCount > 99 ? "99+" : unreadCount}</span>}</NavLink>
-                        <NavLink to="/support"><span className="sidebar-nav-icon"><SidebarIcon name="inbox" /></span>Contact Admin{supportUnreadCount > 0 && <span className="sidebar-unread-badge" aria-label={`${supportUnreadCount} unread support messages`}>{supportUnreadCount > 99 ? "99+" : supportUnreadCount}</span>}</NavLink>
-                        <NavLink to="/profile"><span className="sidebar-nav-icon"><SidebarIcon name="profile" /></span>Agency profile</NavLink>
-                    </>}
-                    {user?.role === "admin" && <>
-                        <NavLink to="/admin" aria-label="Admin console" title="Admin console">
-                            <span className="sidebar-nav-icon"><SidebarIcon name="reports" /></span>
-                            <span className="admin-nav-label-long">Admin console</span>
-                            <span className="admin-nav-label-short" aria-hidden="true">Admin</span>
-                            {pendingApprovalCount > 0 && <span className="sidebar-approval-badge" aria-label={`${pendingApprovalCount} administrator requests need review`}>{pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}</span>}
-                        </NavLink>
-                        <NavLink to="/admin#support-inbox" aria-label="Support Inbox" title="Support Inbox">
-                            <span className="sidebar-nav-icon"><SidebarIcon name="inbox" /></span>
-                            <span className="admin-nav-label-long">Support Inbox</span>
-                            <span className="admin-nav-label-short" aria-hidden="true">Support</span>
-                            {supportUnreadCount > 0 && <span className="sidebar-approval-badge" aria-label={`${supportUnreadCount} unread support conversations`}>{supportUnreadCount > 99 ? "99+" : supportUnreadCount}</span>}
-                        </NavLink>
-                    </>}
+                    {desktopNavigationItems.map((item) => <NavLink
+                        key={item.id}
+                        to={item.to}
+                        end={item.end}
+                        aria-label={item.desktopTitle || (item.id === "admin-support" ? "Support Inbox" : undefined)}
+                        title={item.desktopTitle || (item.id === "admin-support" ? "Support Inbox" : undefined)}
+                    >
+                        <span className="sidebar-nav-icon"><SidebarIcon name={item.icon} /></span>
+                        {item.shortLabel
+                            ? <>
+                                <span className="admin-nav-label-long">{item.label}</span>
+                                <span className="admin-nav-label-short" aria-hidden="true">{item.shortLabel}</span>
+                            </>
+                            : <span>{item.label}</span>}
+                        {item.badge > 0 && <span
+                            className={item.badgeType === "approval" ? "sidebar-approval-badge" : "sidebar-unread-badge"}
+                            aria-label={`${item.badge} ${item.badgeLabel}`}
+                        >{item.badge > 99 ? "99+" : item.badge}</span>}
+                    </NavLink>)}
                 </nav>
                 <div className="sidebar-footer">
                     <span className="sidebar-footer-mark">S</span>
@@ -285,12 +333,20 @@ export function Layout() {
                 </div>
             </aside>
             <div className="app-workspace">
-                <header className="topbar">
-                    <div className="topbar-context"><span className="topbar-context-dot" />{user ? `${user.role === "scout" ? "SCOUT & AGENCY" : user.role.toUpperCase()} WORKSPACE` : "SPORTS SCOUTING NETWORK"}</div>
+                <header className={`topbar${!user ? " topbar-guest" : ""}`}>
+                    <div className="topbar-context">
+                        <span className="topbar-context-dot" />
+                        <span className="topbar-context-full">{user ? `${user.role === "scout" ? "SCOUT & AGENCY" : user.role.toUpperCase()} WORKSPACE` : "SPORTS SCOUTING NETWORK"}</span>
+                        <span className="topbar-context-compact">{user ? `${user.role === "scout" ? "SCOUT" : user.role.toUpperCase()} WORKSPACE` : "SSCS NETWORK"}</span>
+                    </div>
                     <div className="account-actions">
                         {loading ? <span className="muted small">Loading…</span> : user ? <>
                             <span className="user-chip"><PhotoAvatar userId={user.id} initials={user.username[0].toUpperCase()} hasPhoto={user.has_profile_photo} version={profilePhotoVersion} className="nav-avatar" />{user.username}<span className="role-label">{user.role === "scout" ? "Scout & Agency" : user.role}</span></span>
-                            {user.role === "admin" && <label className={`topbar-photo-control${profilePhotoUploading ? " is-uploading" : ""}`} title={user.has_profile_photo ? "Change profile photo" : "Upload profile photo"}>
+                            {user.role === "admin" && <label
+                                className={`topbar-photo-control${profilePhotoUploading ? " is-uploading" : ""}`}
+                                title={user.has_profile_photo ? "Change profile photo" : "Upload profile photo"}
+                                aria-label={user.has_profile_photo ? "Change profile photo" : "Upload profile photo"}
+                            >
                                 <input
                                     className="sr-only"
                                     type="file"
@@ -298,13 +354,18 @@ export function Layout() {
                                     onChange={uploadProfilePhoto}
                                     disabled={profilePhotoUploading}
                                 />
-                                <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z" />
-                                    <circle cx="12" cy="13" r="3.5" />
-                                </svg>
-                                {profilePhotoUploading ? "Uploading…" : user.has_profile_photo ? "Change photo" : "Upload photo"}
+                                <Camera size={17} aria-hidden="true" focusable="false" />
+                                <span className="topbar-photo-label">{profilePhotoUploading ? "Uploading…" : user.has_profile_photo ? "Change photo" : "Upload photo"}</span>
                             </label>}
-                            <button className="button button-outline button-compact" onClick={handleLogout} disabled={signingOut}>{signingOut ? "Signing out…" : "Log out"}</button>
+                            <button
+                                className="button button-outline button-compact topbar-logout"
+                                onClick={handleLogout}
+                                disabled={signingOut}
+                                aria-label={signingOut ? "Signing out" : "Log out"}
+                            >
+                                <LogOut className="mobile-control-icon" size={17} aria-hidden="true" />
+                                <span className="topbar-logout-label">{signingOut ? "Signing out…" : "Log out"}</span>
+                            </button>
                         </> : <>
                             <Link className="login-link" to="/login">Log in</Link>
                             <Link className="button button-compact" to="/register">Get started</Link>
@@ -336,6 +397,37 @@ export function Layout() {
                     <span>Connecting talent with opportunity</span>
                 </footer>
             </div>
+            <nav className="mobile-bottom-nav" aria-label="Mobile primary navigation">
+                {mobileNavigationItems.map((item) => {
+                    const Icon = item.mobileIcon;
+                    const isBadgeVisible = item.badge > 0;
+                    return <NavLink
+                        key={item.id}
+                        to={item.to}
+                        end={item.end}
+                        aria-label={item.accessibleMobileLabel || item.label}
+                        title={item.accessibleMobileLabel || item.label}
+                        className={({ isActive }) => {
+                            const isAdminSupportActive = item.id === "admin-support"
+                                && location.pathname === "/admin"
+                                && location.hash === "#support-inbox";
+                            const isAdminConsoleActive = item.id === "admin-console"
+                                && location.pathname === "/admin"
+                                && location.hash !== "#support-inbox";
+                            const active = item.id === "admin-support"
+                                ? isAdminSupportActive
+                                : item.id === "admin-console"
+                                    ? isAdminConsoleActive
+                                    : isActive;
+                            return `mobile-nav-link${active ? " is-active" : ""}`;
+                        }}
+                    >
+                        <span className="mobile-nav-icon"><Icon size={20} strokeWidth={2} aria-hidden="true" focusable="false" /></span>
+                        <span className="mobile-nav-label">{item.mobileLabel || item.label}</span>
+                        {isBadgeVisible && <span className="mobile-nav-badge" aria-label={`${item.badge} ${item.badgeLabel}`}>{item.badge > 99 ? "99+" : item.badge}</span>}
+                    </NavLink>;
+                })}
+            </nav>
         </div>
     );
 }
