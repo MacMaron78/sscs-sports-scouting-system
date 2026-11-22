@@ -1027,8 +1027,8 @@ export function AthleteSearchPage() {
             </div>
             <div className="filter-actions"><button className="button">Search athletes</button><button className="button button-quiet" type="button" onClick={() => { const empty = { sport: "", position: "", age: "", location: "", competitionLevel: "" }; setFilters(empty); setSearchParams({}); loadAthletes(empty); }}>Clear filters</button></div>
         </form>
-        <div className="results-heading"><div><p className="eyebrow">TALENT DISCOVERY</p><h2>{loading ? "Searching…" : `${athletes.length} athlete${athletes.length === 1 ? "" : "s"} found`}</h2></div></div>
-        {loading ? <PageLoading /> : <div className="athlete-grid">
+        <div className="results-heading"><div><p className="eyebrow">TALENT DISCOVERY</p><h2>{loading ? "Searching…" : error && athletes.length === 0 ? "Search unavailable" : `${athletes.length} athlete${athletes.length === 1 ? "" : "s"} found`}</h2></div></div>
+        {loading ? <PageLoading /> : error && athletes.length === 0 ? null : <div className="athlete-grid">
             {athletes.map((athlete) => <AthleteCard key={athlete.id} athlete={athlete} shortlisted={shortlistIds.has(String(athlete.id))} onShortlist={shortlist} />)}
             {athletes.length === 0 && <EmptyState title="No athletes match those filters" action={<button className="button button-outline" onClick={() => { const empty = { sport: "", position: "", age: "", location: "", competitionLevel: "" }; setFilters(empty); setSearchParams({}); loadAthletes(empty); }}>Browse all athletes</button>}>Try changing your criteria, or clear filters to browse all registered profiles.</EmptyState>}
         </div>}
@@ -1632,7 +1632,7 @@ export function AgencyDirectoryPage() {
                 <span className="agency-network-node agency-network-node-three" />
                 <span className="agency-network-label">TALENT / CONNECTED</span>
             </div>
-            <div className="agency-directory-count"><strong>{loading ? "—" : agencies.length.toString().padStart(2, "0")}</strong><span>ORGANIZATIONS</span></div>
+            <div className="agency-directory-count"><strong>{loading || error ? "—" : agencies.length.toString().padStart(2, "0")}</strong><span>ORGANIZATIONS</span></div>
         </header>
 
         <ErrorNotice error={error} />
@@ -1666,10 +1666,10 @@ export function AgencyDirectoryPage() {
             <div className="agency-directory-tools">
                 <label className="agency-directory-search"><span aria-hidden="true">⌕</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search agencies, countries…" aria-label="Search agencies by name, country, or phone" /></label>
                 <label className="agency-country-filter"><span>LOCATION</span><select value={country} onChange={(event) => setCountry(event.target.value)} aria-label="Filter agencies by country"><option value="">All countries</option>{countries.map((entry) => <option key={entry} value={entry}>{entry}</option>)}</select></label>
-                <span className="agency-result-count">{loading ? "Loading…" : `${filteredAgencies.length} ${filteredAgencies.length === 1 ? "organization" : "organizations"}`}</span>
+                <span className="agency-result-count">{loading ? "Loading…" : error ? "Unavailable" : `${filteredAgencies.length} ${filteredAgencies.length === 1 ? "organization" : "organizations"}`}</span>
             </div>
 
-            {loading ? <PageLoading /> : filteredAgencies.length > 0
+            {loading ? <PageLoading /> : error ? null : filteredAgencies.length > 0
                 ? <div className="agency-network-grid">{filteredAgencies.map((agency, index) =>
                     <article className="agency-network-card" key={agency.id}>
                         <div className="agency-network-card-top">
@@ -1897,12 +1897,12 @@ export function InboxPage() {
                 <span className="inbox-signal inbox-signal-two" />
                 <span className="inbox-visual-label">NETWORK / ONLINE</span>
             </div>
-            <div className="inbox-hero-count"><strong>{unreadCount.toString().padStart(2, "0")}</strong><span>UNREAD</span></div>
+            <div className="inbox-hero-count"><strong>{error && messages.length === 0 ? "—" : unreadCount.toString().padStart(2, "0")}</strong><span>UNREAD</span></div>
         </header>
 
         <div className="inbox-overview">
-            <div className="inbox-overview-item"><span className="inbox-overview-icon">↙</span><span><small>RECEIVED</small><strong>{receivedMessages.length.toString().padStart(2, "0")}</strong></span></div>
-            <div className="inbox-overview-item"><span className="inbox-overview-icon">↗</span><span><small>SENT</small><strong>{sentMessages.length.toString().padStart(2, "0")}</strong></span></div>
+            <div className="inbox-overview-item"><span className="inbox-overview-icon">↙</span><span><small>RECEIVED</small><strong>{error && messages.length === 0 ? "—" : receivedMessages.length.toString().padStart(2, "0")}</strong></span></div>
+            <div className="inbox-overview-item"><span className="inbox-overview-icon">↗</span><span><small>SENT</small><strong>{error && messages.length === 0 ? "—" : sentMessages.length.toString().padStart(2, "0")}</strong></span></div>
             <div className="inbox-overview-note"><span className="inbox-live-indicator" /> YOUR NETWORK IS READY WHEN YOU ARE</div>
         </div>
 
@@ -1939,8 +1939,8 @@ export function InboxPage() {
             </div>
             <div className="inbox-controls">
                 <div className="inbox-tabs" role="tablist" aria-label="Message folder">
-                    <button role="tab" aria-selected={tab === "received"} className={tab === "received" ? "tab active" : "tab"} onClick={() => setTab("received")}>Received <span>{receivedMessages.length}</span></button>
-                    <button role="tab" aria-selected={tab === "sent"} className={tab === "sent" ? "tab active" : "tab"} onClick={() => setTab("sent")}>Sent <span>{sentMessages.length}</span></button>
+                    <button role="tab" aria-selected={tab === "received"} className={tab === "received" ? "tab active" : "tab"} onClick={() => setTab("received")}>Received <span>{error && messages.length === 0 ? "—" : receivedMessages.length}</span></button>
+                    <button role="tab" aria-selected={tab === "sent"} className={tab === "sent" ? "tab active" : "tab"} onClick={() => setTab("sent")}>Sent <span>{error && messages.length === 0 ? "—" : sentMessages.length}</span></button>
                 </div>
                 <label className="inbox-search">
                     <span aria-hidden="true">⌕</span>
@@ -1948,7 +1948,7 @@ export function InboxPage() {
                     <kbd>/</kbd>
                 </label>
             </div>
-            {loading ? <PageLoading /> : <div className="message-list">
+            {loading ? <PageLoading /> : error && messages.length === 0 ? null : <div className="message-list">
             {filteredMessages.map((message) => {
                 const incoming = String(message.recipient_id) === String(user.id);
                 const otherId = incoming ? message.sender_id : message.recipient_id;

@@ -123,7 +123,7 @@ export function SupportInboxPage() {
             </div>
             {loading ? <Loading label="Loading support conversation…" /> : messages.length
                 ? <SupportMessageList messages={messages} currentUserId={user.id} listRef={messageListRef} />
-                : <div className="support-empty-state">
+                : error ? null : <div className="support-empty-state">
                     <strong>How can we help?</strong>
                     <p>Send a message to start a conversation with the SSCS administrator.</p>
                 </div>}
@@ -294,7 +294,7 @@ export function AdminSupportInbox() {
     return <section className="admin-users admin-directory admin-support-inbox" id="support-inbox">
         <div className="admin-directory-heading">
             <div><p className="admin-kicker"><span /> USER CARE</p><h2>Support messages</h2><p>Private conversations from athletes and Scout/Agency accounts.</p></div>
-            <div className="admin-record-count"><strong>{conversations.length.toString().padStart(2, "0")}</strong><span>SUPPORT<br />THREADS</span></div>
+            <div className="admin-record-count"><strong>{error && conversations.length === 0 ? "—" : conversations.length.toString().padStart(2, "0")}</strong><span>SUPPORT<br />THREADS</span></div>
         </div>
         <ErrorNotice error={error} />
         {loading ? <Loading label="Loading support inbox…" /> : <div className="admin-support-layout">
@@ -310,7 +310,7 @@ export function AdminSupportInbox() {
                     <span className="admin-support-preview">{conversation.latest_message || "No messages yet"}</span>
                     <span className="admin-support-conversation-bottom"><time>{conversation.latest_message_at ? formatDate(conversation.latest_message_at) : formatDate(conversation.created_at)}</time><span className={`support-status is-${conversation.status}`}>{conversation.status}</span></span>
                 </button>)}
-                {!conversations.length && <div className="support-empty-state"><strong>No support conversations yet</strong><p>New messages from users will appear here.</p></div>}
+                {!conversations.length && !error && <div className="support-empty-state"><strong>No support conversations yet</strong><p>New messages from users will appear here.</p></div>}
             </nav>
             <div className="admin-support-thread">
                 {selected ? <>
@@ -322,7 +322,7 @@ export function AdminSupportInbox() {
                     </div>
                     {threadLoading ? <Loading label="Loading conversation…" /> : messages.length
                         ? <SupportMessageList messages={messages} currentUserId={user?.id} listRef={messageListRef} />
-                        : <div className="support-empty-state"><strong>No messages in this conversation</strong></div>}
+                        : error ? null : <div className="support-empty-state"><strong>No messages in this conversation</strong></div>}
                     <SupportComposer onSend={sendReply} sending={sending} />
                 </> : <div className="support-empty-state"><strong>Select a conversation</strong><p>Choose a user from the support inbox to view and reply.</p></div>}
             </div>
